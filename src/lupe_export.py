@@ -18,7 +18,9 @@ import numpy as np
 import lupe_run as R
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DIR = os.path.join(HERE, 'examples')
+# examples live next to the page (gguf-lupe.html), which sits in the folder above src/
+ROOT = next((d for d in (HERE, os.path.dirname(HERE)) if os.path.isfile(os.path.join(d, 'gguf-lupe.html'))), os.path.dirname(HERE))
+DIR = os.path.join(ROOT, 'examples')
 SPECIAL = re.compile(r'^<\|.*\|>$|^<.*>$')
 DE_WORDS = re.compile(r'\b(?:ist|der|die|das|und|was|wie|welche[mnrs]?|hat)\b')
 EN_WORDS = re.compile(r'\b(?:the|a|is|are|what|who|how|which|where|when|why|and|of|to|do|does|did|can|you|it|this|that)\b')   # "was", "die", "hat" are English words too
@@ -142,7 +144,7 @@ def write_index(entry=None, drop=None):
     items = [x for x in read_index() if x.get('id') not in ({entry['id']} if entry else set()) | ({drop} if drop else set())]
     if entry:
         items.append(entry)
-    items = [x for x in items if os.path.exists(os.path.join(HERE, x['file']))]
+    items = [x for x in items if os.path.exists(os.path.join(ROOT, x['file']))]
     with open(os.path.join(DIR, 'index.js'), 'w', encoding='utf-8') as f:
         f.write('// GGUF-Lupe: list of recorded examples (rewritten whenever an example is saved)\n')
         f.write('lupeBeispielListe(' + json.dumps(items, ensure_ascii=False, indent=1) + ');\n')

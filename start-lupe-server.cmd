@@ -39,5 +39,5 @@ pause
 exit /b 1
 
 :run
-"%PY%" %PYA% lupe_server.py %*
+"%PY%" %PYA% src\lupe_server.py %*
 pause

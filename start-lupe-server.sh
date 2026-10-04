@@ -17,4 +17,4 @@ if ! "$PY" -c "import numpy, gguf" 2>/dev/null; then
   esac
   exit 1
 fi
-exec "$PY" lupe_server.py "$@"
+exec "$PY" src/lupe_server.py "$@"

@@ -73,7 +73,7 @@ A GPU is optional: the CPU gives the same result, just slower (full token map of
 Your browser opens `http://127.0.0.1:8765/`. At the top, pick GPU or CPU and your model, then open it. Until then the page shows the demo.
 
 ```
-python lupe_server.py [--port 8765] [--device auto|gpu|cuda|mps|cpu] [--models DIR ...] [--no-browser]
+python src/lupe_server.py [--port 8765] [--device auto|gpu|cuda|mps|cpu] [--models DIR ...] [--no-browser]
 ```
 
 `--models` adds folders to the default search: `~/.lmstudio/models`, `~/.cache/lm-studio/models`, `~/.cache/huggingface/hub`, `~/models`, `~/Downloads`. The start scripts pass options on. Another Python: `LUPE_PYTHON` or `lupe-python.txt` (see the start scripts).
@@ -88,7 +88,7 @@ On first use, the **Forward pass** tab offers buttons that download the official
 | Vulkan | NVIDIA, AMD and Intel GPUs | ~33 MB |
 | CPU | no GPU | ~19 MB |
 
-By hand: unpack the archive from the [b11388 release](https://github.com/ggml-org/llama.cpp/releases/tag/b11388) into `llama.cpp/` next to `lupe_server.py`, or into the cache folder above. For CUDA, add the `cudart-…` archive to the same folder.
+By hand: unpack the archive from the [b11388 release](https://github.com/ggml-org/llama.cpp/releases/tag/b11388) into `llama.cpp/` next to `gguf-lupe.html`, or into the cache folder above. For CUDA, add the `cudart-…` archive to the same folder.
 
 The model always picks the most likely token (same question, same answer; question + answer: at most 100 tokens). Then the whole text runs again while every step of llama.cpp's real compute graph is recorded. You see:
 
@@ -114,7 +114,7 @@ Real forward passes recorded with llama.cpp, at the top of the **Forward pass** 
 **Make your own:** with the server, run a question and click **Save as example**. The file (about 5 to 12 MB) goes into `examples/` and appears in the list. Or, with the server running (the model must be in one of its model folders):
 
 ```
-python make_example.py "Question" --model PATH-TO.gguf
+python src/make_example.py "Question" --model PATH-TO.gguf
 ```
 
 ## Privacy and storage
@@ -125,7 +125,7 @@ python make_example.py "Question" --model PATH-TO.gguf
 | What | Where |
 |---|---|
 | Computed maps | `~/.cache/gguf-lupe/*.lupe-map.bin`, one per model file; delete anytime |
-| llama.cpp | `~/.cache/gguf-lupe/llama.cpp-b11388/` (or `llama.cpp/` next to the server) |
+| llama.cpp | `~/.cache/gguf-lupe/llama.cpp-b11388/` (or `llama.cpp/` next to `gguf-lupe.html`) |
 | Last 30 models, device, language | browser `localStorage`: `lupe-model-history`, `lupe-device`, `lupe-lang` |
 | Recorded runs | memory only (last 4); on disk only if saved as an example |
 

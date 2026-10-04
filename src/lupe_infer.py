@@ -85,7 +85,7 @@ SHAPE_OPS = {'NONE', 'VIEW', 'RESHAPE', 'PERMUTE', 'TRANSPOSE', 'CPY', 'CONT', '
 def find_builds(extra=()):
     """Folders that contain llama.dll / libllama.so / libllama.dylib of a llama.cpp release."""
     here = os.path.dirname(os.path.abspath(__file__))
-    roots = list(extra) + [os.path.join(here, 'llama.cpp'), os.path.join(os.path.expanduser('~'), '.cache', 'gguf-lupe', f'llama.cpp-{LLAMA_VERSION}')]
+    roots = list(extra) + [os.path.join(os.path.dirname(here), 'llama.cpp'), os.path.join(here, 'llama.cpp'), os.path.join(os.path.expanduser('~'), '.cache', 'gguf-lupe', f'llama.cpp-{LLAMA_VERSION}')]
     names = ['llama.dll'] if sys.platform == 'win32' else ['libllama.dylib'] if sys.platform == 'darwin' else ['libllama.so']
     out = []
     def dirs(r, depth=3):                     # release archives unpack with or without sub-folders

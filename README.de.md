@@ -73,7 +73,7 @@ Eine Grafikkarte ist optional: Die CPU liefert dasselbe Ergebnis, nur langsamer 
 Der Browser öffnet `http://127.0.0.1:8765/`. Oben wählst du GPU oder CPU sowie dein Modell und öffnest es. Bis dahin zeigt die Seite das eingebaute Beispiel.
 
 ```
-python lupe_server.py [--port 8765] [--device auto|gpu|cuda|mps|cpu] [--models ORDNER ...] [--no-browser]
+python src/lupe_server.py [--port 8765] [--device auto|gpu|cuda|mps|cpu] [--models ORDNER ...] [--no-browser]
 ```
 
 `--models` ergänzt weitere Ordner. Automatisch durchsucht werden `~/.lmstudio/models`, `~/.cache/lm-studio/models`, `~/.cache/huggingface/hub`, `~/models` und `~/Downloads`. Die Startdateien reichen Optionen durch. Anderes Python: `LUPE_PYTHON` oder `lupe-python.txt` (siehe Startdateien).
@@ -88,7 +88,7 @@ Beim ersten Mal bietet der Tab **Durchlauf** Knöpfe an, die die offizielle llam
 | Vulkan | Grafikkarten von NVIDIA, AMD und Intel | ca. 33 MB |
 | CPU | Rechner ohne Grafikkarte | ca. 19 MB |
 
-Von Hand: das Archiv vom [Release b11388](https://github.com/ggml-org/llama.cpp/releases/tag/b11388) in einen Ordner `llama.cpp` neben `lupe_server.py` oder in den Cache-Ordner oben entpacken. Für CUDA kommt das Archiv `cudart-…` in denselben Ordner.
+Von Hand: das Archiv vom [Release b11388](https://github.com/ggml-org/llama.cpp/releases/tag/b11388) in einen Ordner `llama.cpp` neben `gguf-lupe.html` oder in den Cache-Ordner oben entpacken. Für CUDA kommt das Archiv `cudart-…` in denselben Ordner.
 
 Das Modell nimmt immer das wahrscheinlichste Token (dieselbe Frage, dieselbe Antwort; Frage und Antwort zusammen höchstens 100 Tokens). Dann wird der ganze Text noch einmal gerechnet und jeder Schritt des echten Rechengraphen von llama.cpp mitgeschrieben. Du siehst:
 
@@ -114,7 +114,7 @@ Echte, mit llama.cpp aufgezeichnete Durchläufe, oben im Tab **Durchlauf**. Zum 
 **Eigene Beispiele:** Mit dem Server eine Frage durchrechnen und auf **Als Beispiel speichern** klicken. Die Datei (etwa 5 bis 12 MB) landet in `examples/` und erscheint in der Liste. Oder bei laufendem Server (das Modell muss in einem seiner Modell-Ordner liegen):
 
 ```
-python make_example.py "Frage" --model PFAD-ZUR-DATEI.gguf
+python src/make_example.py "Frage" --model PFAD-ZUR-DATEI.gguf
 ```
 
 ## Datenschutz und Speicherorte
@@ -125,7 +125,7 @@ python make_example.py "Frage" --model PFAD-ZUR-DATEI.gguf
 | Was | Wo |
 |---|---|
 | Berechnete Landkarten | `~/.cache/gguf-lupe/*.lupe-map.bin`, eine je Modelldatei; jederzeit löschbar |
-| llama.cpp | `~/.cache/gguf-lupe/llama.cpp-b11388/` (oder `llama.cpp/` neben dem Server) |
+| llama.cpp | `~/.cache/gguf-lupe/llama.cpp-b11388/` (oder `llama.cpp/` neben `gguf-lupe.html`) |
 | Letzte 30 Modelle, Rechengerät, Sprache | Browserspeicher (`localStorage`): `lupe-model-history`, `lupe-device`, `lupe-lang` |
 | Aufgezeichnete Durchläufe | nur im Arbeitsspeicher (die letzten 4); auf die Festplatte nur als gespeichertes Beispiel |
 

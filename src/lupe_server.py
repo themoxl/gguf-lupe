@@ -467,7 +467,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, f.read(), 'text/html; charset=utf-8')
         if p.startswith('/examples/'):                       # recorded examples next to the page
             name = p[len('/examples/'):]
-            fn = os.path.join(HERE, 'examples', name)
+            fn = os.path.join(os.path.dirname(PAGE), 'examples', name)
             if not re.fullmatch(r'[a-z0-9-]+\.js', name) or not os.path.isfile(fn):
                 return self.send(404, '// kein Beispiel', 'text/javascript; charset=utf-8')
             with open(fn, 'rb') as f:
@@ -633,8 +633,8 @@ def main():
         lupe_run.FORCE_BUILD = os.path.abspath(ARGS.llama)
     PAGE = ARGS.page or next((p for p in [os.path.join(HERE, 'gguf-lupe.html'), os.path.join(HERE, '..', 'gguf-lupe.html')] if os.path.isfile(p)), None)
     if not PAGE:
-        sys.exit(say('gguf-lupe.html nicht gefunden (neben dem Server ablegen oder --page angeben).',
-                     'gguf-lupe.html not found (put it next to the server or use --page).'))
+        sys.exit(say('gguf-lupe.html nicht gefunden (gehört in den Ordner über src/, oder --page angeben).',
+                     'gguf-lupe.html not found (it belongs in the folder above src/, or use --page).'))
     MODEL_DIRS = [os.path.realpath(d) for d in (ARGS.models + default_model_dirs()) if os.path.isdir(d)]
     url = f'http://127.0.0.1:{ARGS.port}/'
     devs, dflt, n_models = ', '.join(d['kind'] + ' ' + str(d['name']) for d in devices()), pick_device(ARGS.device), len(list_models())
