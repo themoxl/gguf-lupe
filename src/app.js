@@ -2409,7 +2409,7 @@ async function detectServer() {
     if (await probeLocalServer()) { SRV.fileOnly = true; renderServerBar(); }
     return;
   }
-  if (!/^https?:$/.test(location.protocol)) return;
+  if (!/^https?:$/.test(location.protocol) || !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
   try { const r = await fetch('/api/info'); if (!r.ok) return; const j = await r.json(); if (j.server !== 'GGUF-Lupe') return; SRV.info = j; SRV.on = true; } catch { return; }
   await renderServerBar();
   updateReadStat();
