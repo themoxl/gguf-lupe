@@ -1,0 +1,1068 @@
+<title>GGUF-Lupe</title>
+<style>/*FONTS*/</style>
+<style>
+:root {
+  --ground: #f2f4f7; --surface: #fcfcfd; --sunken: #e8ecf1;
+  --ink: #0f1520; --ink-2: #465063; --muted: #6f788b;
+  --line: #dce1e9; --line-2: #c3cad6; --focus: #2a78d6;
+  --c-ffn: #2a78d6; --c-attn: #eb6834; --c-lin: #1baf7a; --c-emb: #eda100; --c-head: #e87ba4;
+  --c-moe: #008300; --c-mtp: #4a3aa7; --c-norm: #a3abb9; --c-other: #c4cad4;
+  --f0: #2a78d6; --f1: #eb6834; --f2: #1baf7a; --f3: #eda100; --f4: #4a3aa7;
+  --div-neg: #2a78d6; --div-mid: #f0efec; --div-pos: #e34948;
+  --tip-bg: #0f1520; --tip-ink: #f3f5f8; --tip-muted: #aab3c2;
+  --err-bg: #fbe9e8; --err-ink: #8a1f1d;
+  --scheme: light;
+  --font-ui: "Archivo", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark; --scheme: dark;
+    --ground: #0c0f14; --surface: #141922; --sunken: #1c222d;
+    --ink: #e8ecf2; --ink-2: #aeb6c4; --muted: #8790a2;
+    --line: #252c38; --line-2: #374050; --focus: #5598e7;
+    --c-ffn: #3987e5; --c-attn: #d95926; --c-lin: #199e70; --c-emb: #c98500; --c-head: #d55181;
+    --c-moe: #008300; --c-mtp: #9085e9; --c-norm: #596274; --c-other: #454e5d;
+    --f0: #3987e5; --f1: #d95926; --f2: #199e70; --f3: #c98500; --f4: #9085e9;
+    --div-neg: #3987e5; --div-mid: #383835; --div-pos: #e66767;
+    --tip-bg: #e8ecf2; --tip-ink: #0f1520; --tip-muted: #4a5366;
+    --err-bg: #3a1716; --err-ink: #ffb4ad;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark; --scheme: dark;
+  --ground: #0c0f14; --surface: #141922; --sunken: #1c222d;
+  --ink: #e8ecf2; --ink-2: #aeb6c4; --muted: #8790a2;
+  --line: #252c38; --line-2: #374050; --focus: #5598e7;
+  --c-ffn: #3987e5; --c-attn: #d95926; --c-lin: #199e70; --c-emb: #c98500; --c-head: #d55181;
+  --c-moe: #008300; --c-mtp: #9085e9; --c-norm: #596274; --c-other: #454e5d;
+  --f0: #3987e5; --f1: #d95926; --f2: #199e70; --f3: #c98500; --f4: #9085e9;
+  --div-neg: #3987e5; --div-mid: #383835; --div-pos: #e66767;
+  --tip-bg: #e8ecf2; --tip-ink: #0f1520; --tip-muted: #4a5366;
+  --err-bg: #3a1716; --err-ink: #ffb4ad;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font: 400 15px/1.5 var(--font-ui); font-stretch: 100%;
+  font-variant-ligatures: none; /* keep <|im_end|> & co. literal in JetBrains Mono */
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: clamp(16px, 4vw, 40px); }
+.mono { font-family: var(--font-mono); font-size: 0.92em; }
+.num { font-variant-numeric: tabular-nums; }
+h1, h2, h3 { margin: 0; text-wrap: balance; font-stretch: 112%; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 700; line-height: 1.2; }
+h3 { font-size: 15px; font-weight: 650; }
+p { margin: 0; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { color: var(--ink-2); max-width: 68ch; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+a { color: inherit; }
+
+/* top bar */
+.top { border-bottom: 1px solid var(--line); background: var(--surface); }
+.top .wrap { display: flex; align-items: center; gap: 16px; padding-block: 12px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand svg { flex: none; }
+.brand b { font-size: 18px; font-weight: 800; font-stretch: 125%; letter-spacing: -0.01em; }
+.brand span { color: var(--muted); font-size: 13px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line-2);
+  background: var(--surface); border-radius: 8px; padding: 7px 13px; cursor: pointer; font-weight: 600; font-size: 14px;
+}
+.btn:hover { border-color: var(--ink-2); }
+.btn.primary { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.btn.primary:hover { opacity: .9; }
+.drop-hint { color: var(--muted); font-size: 13px; }
+#fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+main { display: block; }
+section { display: grid; gap: 16px; min-width: 0; }
+.sec-head { display: grid; gap: 4px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; min-width: 0; }
+figure { margin: 0; }
+figcaption { font-size: 13px; color: var(--ink-2); }
+figcaption b { color: var(--ink); font-weight: 650; }
+
+/* hero */
+.file-line { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.file-line h1 { font-size: clamp(22px, 3.6vw, 34px); font-weight: 750; line-height: 1.15; overflow-wrap: anywhere; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-2); white-space: nowrap; }
+.pill.live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c-lin); }
+.readstat { font-size: 15px; color: var(--ink-2); max-width: 80ch; }
+.readstat strong { color: var(--ink); font-weight: 700; }
+.strip-panel { display: grid; gap: 8px; }
+.strip-top { position: relative; height: 20px; }
+.hdr-callout { position: absolute; left: 0; bottom: 0; font-size: 12px; font-weight: 600; color: var(--ink); display: flex; align-items: flex-end; gap: 6px; white-space: nowrap; }
+.hdr-callout::before { content: ""; width: 2px; height: 16px; background: var(--ink); }
+#strip { display: block; width: 100%; height: 56px; border-radius: 4px; cursor: crosshair; touch-action: pan-y; }
+.axis { position: relative; height: 18px; font-size: 12px; color: var(--muted); }
+.axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.axis span:first-child { transform: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; margin: 0; }
+.facts div { padding: 12px 14px; display: grid; gap: 2px; align-content: start; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -1px -1px 0; }
+.facts dt { font-size: 12px; color: var(--muted); letter-spacing: .02em; }
+.facts dd { margin: 0; font-size: 17px; font-weight: 650; font-stretch: 106%; overflow-wrap: anywhere; }
+.facts dd small { display: block; font-size: 12px; font-weight: 400; color: var(--ink-2); font-stretch: 100%; }
+
+/* bars */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+.bars { display: grid; gap: 10px; margin-top: 14px; }
+.bar-row { display: grid; grid-template-columns: minmax(118px, 34%) 1fr; gap: 4px 12px; align-items: center; cursor: default; }
+.bar-row .lab { font-size: 13px; color: var(--ink); line-height: 1.25; }
+.bar-row .lab small { display: block; color: var(--muted); font-size: 12px; }
+.bar-row .lab i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.bar-track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar { height: 16px; border-radius: 0 4px 4px 0; min-width: 2px; flex: none; }
+.bar-val { font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* shared controls */
+.layer-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; justify-content: space-between; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--line-2); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+.seg button:disabled { opacity: .45; cursor: not-allowed; }
+.scroll-x { overflow-x: auto; }
+#layerChart svg, .svg-host svg { display: block; }
+.chart-text { fill: var(--muted); font: 11px var(--font-ui); font-variant-numeric: tabular-nums; }
+.gridline { stroke: var(--line); stroke-width: 1; }
+.baseline { stroke: var(--line-2); stroke-width: 1; }
+.hit { cursor: pointer; }
+.hit:hover { opacity: .82; }
+.field { display: flex; align-items: center; gap: 8px; flex: 1 1 320px; min-width: 0; }
+.field label { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.field input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); font-family: var(--font-mono); font-size: 13px; }
+.row-tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 3px 8px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); white-space: nowrap; }
+.chip b { color: var(--ink); font-weight: 650; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.quick button { border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 3px 8px; font-family: var(--font-mono); font-size: 12px; cursor: pointer; color: var(--ink); }
+.quick button.ui { font-family: var(--font-ui); }
+.quick button:hover { border-color: var(--ink-2); }
+.quick button[aria-current="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.scale { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; max-width: 520px; }
+.scale .ramp { height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--div-neg), var(--div-mid), var(--div-pos)); }
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px 16px; margin: 0; }
+.stats dt { font-size: 12px; color: var(--muted); }
+.stats dd { margin: 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.note { font-size: 14px; color: var(--ink-2); background: var(--sunken); border-radius: 8px; padding: 12px 14px; }
+.note b { color: var(--ink); }
+.readline { font-size: 13px; color: var(--ink-2); }
+.readline strong { color: var(--ink); }
+.explain { font-size: 16px; line-height: 1.55; color: var(--ink-2); max-width: 78ch; }
+.explain b { color: var(--ink); font-weight: 650; }
+.cap { font-size: 13px; color: var(--ink-2); }
+.cap b { color: var(--ink); font-weight: 650; }
+
+/* main tabs */
+.maintabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--ground); border-bottom: 1px solid var(--line); }
+.maintabs .wrap { display: flex; align-items: stretch; gap: 14px; overflow-x: auto; scrollbar-width: thin; }
+.maintabs .tabrow { display: flex; gap: 2px; }
+.maintabs .areas { display: flex; align-self: center; flex-shrink: 0; border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; margin-block: 6px; }
+.maintabs .areas button { display: grid; gap: 0; text-align: left; border: 0; border-bottom: 0; padding: 5px 13px; background: var(--surface); color: var(--ink-2); font-size: 14px; line-height: 1.25; }
+.maintabs .areas button + button { border-left: 1px solid var(--line-2); }
+.maintabs .areas button small { font-size: 11px; font-weight: 500; color: var(--muted); }
+.maintabs .areas button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+.maintabs .areas button[aria-pressed="true"] small { color: color-mix(in srgb, var(--ground) 75%, transparent); }
+.maintabs .tab-tour { color: var(--ink-2); }
+.maintabs button { border: 0; background: none; padding: 12px 14px 10px; font-weight: 650; font-size: 15px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; font-stretch: 106%; }
+.maintabs button:hover { color: var(--ink-2); }
+.maintabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.maintabs button small { font-weight: 500; color: var(--muted); margin-left: 5px; font-size: 12px; }
+.filebar .wrap { padding-block: 18px 14px; display: grid; gap: 6px; }
+.filebar .wrap > * { min-width: 0; }
+.pane { display: grid; gap: 28px; padding-block: 24px 56px; }
+.pane > section { display: grid; gap: 14px; min-width: 0; }
+.subtabs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* matrix view */
+.mv { display: grid; gap: 8px; min-width: 0; }
+.mv-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.mv-vp { position: relative; height: min(66vh, 600px); min-height: 280px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.mv-vp.short { height: auto; }
+.mv-vp canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+.mv-sc { position: absolute; inset: 0; overflow: auto; outline-offset: -2px; }
+.mv-sp { position: relative; }
+.mv-pos { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; min-height: 1.5em; }
+.mv-pos b { color: var(--ink); }
+
+/* overview bars */
+.bars { display: grid; gap: 10px; margin-top: 14px; }
+
+/* tokens */
+.tok-input { width: 100%; min-height: 92px; resize: vertical; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); font: 400 17px/1.5 var(--font-ui); }
+.tok-flow { display: flex; flex-wrap: wrap; gap: 6px 3px; align-items: flex-start; }
+.tk { display: inline-grid; justify-items: center; gap: 1px; border: 0; padding: 3px 5px 2px; border-radius: 5px; cursor: pointer; font: inherit; color: var(--ink); background: var(--tkbg, var(--sunken)); min-width: 1.6em; }
+.tk .tt { font-family: var(--font-mono); font-size: 16px; line-height: 1.3; white-space: pre; }
+.tk small { font-size: 10.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tk[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+.tk.special { outline: 1px dashed var(--ink-2); outline-offset: -1px; }
+.tk .ws, .vl .ws, .steps .ws, .tok .ws { color: var(--muted); }
+.tk-c0 { --tkbg: color-mix(in srgb, var(--f0) 22%, transparent); }
+.tk-c1 { --tkbg: color-mix(in srgb, var(--f1) 22%, transparent); }
+.tk-c2 { --tkbg: color-mix(in srgb, var(--f2) 22%, transparent); }
+.tk-c3 { --tkbg: color-mix(in srgb, var(--f3) 26%, transparent); }
+.tk-c4 { --tkbg: color-mix(in srgb, var(--f4) 22%, transparent); }
+.tk-c5 { --tkbg: color-mix(in srgb, var(--c-head) 24%, transparent); }
+.flow-break { flex-basis: 100%; height: 0; }
+.ids { font-family: var(--font-mono); font-size: 13px; color: var(--ink-2); background: var(--sunken); border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; max-height: 9.5em; overflow: auto; }
+.tok-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline; }
+.tok-stats .big { font-size: 30px; font-weight: 750; font-stretch: 110%; line-height: 1.1; color: var(--ink); }
+.tok-stats span { color: var(--ink-2); font-size: 14px; }
+.tok-detail { display: grid; gap: 10px; }
+.tok-detail h3 { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; }
+.tok-detail h3 code { font-family: var(--font-mono); font-size: 18px; }
+.vecstrip { width: 100%; height: 34px; border-radius: 4px; image-rendering: pixelated; background: var(--sunken); display: block; }
+.vecnums { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
+.steps { display: grid; gap: 6px; overflow-x: auto; }
+.step { display: grid; grid-template-columns: 4.5em 9em minmax(0, 1fr); gap: 10px; align-items: center; font-size: 13px; }
+.step .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.step .rule { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.syms { display: flex; flex-wrap: wrap; gap: 3px; }
+.sym { font-family: var(--font-mono); font-size: 13px; padding: 1px 5px; border-radius: 4px; background: var(--sunken); white-space: pre; }
+.sym.hot { background: var(--ink); color: var(--ground); }
+.sym.hot .ws { color: inherit; }
+.sym.byte { color: var(--muted); }
+.wordpick { display: flex; flex-wrap: wrap; gap: 4px; }
+.wordpick button { font-family: var(--font-mono); font-size: 13px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 2px 7px; cursor: pointer; white-space: pre; color: var(--ink); }
+.wordpick button[aria-current="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.wordpick button[aria-current="true"] .ws { color: inherit; }
+
+/* virtual list */
+.vl { position: relative; height: min(62vh, 560px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.vl-head, .vl-row { display: grid; align-items: center; gap: 12px; padding: 0 12px; font-size: 13px; }
+.vl-head { position: sticky; top: 0; z-index: 2; height: 32px; background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; box-shadow: inset 0 -1px 0 var(--line); }
+.vl-row { position: absolute; left: 0; right: 0; height: 30px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.vl-row:hover { background: var(--sunken); }
+.vl-row[aria-selected="true"] { background: var(--sunken); box-shadow: inset 3px 0 0 var(--ink); }
+.vl-row > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.vl .mono { font-family: var(--font-mono); font-size: 12.5px; }
+.vl .r { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.vl .dim { color: var(--muted); }
+.cols-vocab { grid-template-columns: 6.5em minmax(8em, 1.3fr) minmax(7em, 1fr) 13em 4.5em 4em; }
+.cols-merge { grid-template-columns: 6.5em minmax(10em, 1.5fr) minmax(7em, 1fr) 4.5em 6.5em; }
+@media (max-width: 640px) { .cols-vocab { grid-template-columns: 5.5em 1fr 4em 4em; } .cols-vocab > :nth-child(3), .cols-vocab > :nth-child(4) { display: none; } .cols-merge { grid-template-columns: 5.5em 1fr 3.5em 5.5em; } .cols-merge > :nth-child(3) { display: none; } }
+.catchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.catchips button { border: 1px solid var(--line-2); background: var(--surface); border-radius: 999px; padding: 3px 10px; font-size: 13px; cursor: pointer; color: var(--ink-2); }
+.catchips button small { color: var(--muted); margin-left: 4px; font-variant-numeric: tabular-nums; }
+.catchips button[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.catchips button[aria-pressed="true"] small { color: inherit; opacity: .8; }
+.spec-tbl td:nth-child(2) { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+
+/* tables */
+.tab-tools { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.tab-tools input { padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); min-width: 0; flex: 1 1 260px; max-width: 420px; }
+.count { font-size: 13px; color: var(--muted); }
+.tbl-wrap { overflow: auto; max-height: 68vh; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { position: sticky; top: 0; background: var(--surface); font-size: 12px; color: var(--muted); font-weight: 600; z-index: 1; white-space: nowrap; box-shadow: inset 0 -1px 0 var(--line); }
+th button { all: unset; cursor: pointer; }
+th button:focus-visible { outline: 2px solid var(--focus); }
+th[aria-sort] button::after { content: " ↕"; color: var(--line-2); }
+th[aria-sort="ascending"] button::after { content: " ↑"; color: var(--ink); }
+th[aria-sort="descending"] button::after { content: " ↓"; color: var(--ink); }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; }
+#tensorTable tbody tr { cursor: pointer; }
+#tensorTable tbody tr:hover td { background: var(--sunken); }
+#tensorTable tbody tr[aria-selected="true"] td { background: var(--sunken); box-shadow: inset 3px 0 0 var(--ink); }
+td .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+td.mono, td .mono { font-family: var(--font-mono); font-size: 12px; }
+.meta-val { max-width: 70ch; overflow-wrap: anywhere; }
+.meta-val pre { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; background: var(--sunken); padding: 10px; border-radius: 6px; max-height: 420px; overflow: auto; margin: 8px 0 0; }
+details summary { cursor: pointer; color: var(--ink-2); }
+.arr-items { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+
+/* storage format */
+.hex { display: grid; gap: 3px; font-family: var(--font-mono); font-size: 12px; overflow-x: auto; }
+.hex .row { display: flex; gap: 3px; white-space: nowrap; }
+.hex .off { color: var(--muted); width: 3.2em; flex: none; }
+.hex .b { display: inline-block; width: 2.1em; text-align: center; border-radius: 3px; padding: 1px 0; }
+.f0 { background: color-mix(in srgb, var(--f0) 24%, transparent); }
+.f1 { background: color-mix(in srgb, var(--f1) 24%, transparent); }
+.f2 { background: color-mix(in srgb, var(--f2) 24%, transparent); }
+.f3 { background: color-mix(in srgb, var(--f3) 24%, transparent); }
+.f4 { background: color-mix(in srgb, var(--f4) 24%, transparent); }
+.fields { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.fields div { display: grid; grid-template-columns: 14px 8.5em 1fr; gap: 8px; align-items: baseline; }
+.fields i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; align-self: center; }
+.fields code { font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
+.block-grid { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 18px 28px; align-items: start; }
+@media (max-width: 900px) { .block-grid { grid-template-columns: 1fr; } }
+.vals { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 2px; font-family: var(--font-mono); font-size: 10.5px; overflow-x: auto; min-width: 0; }
+.vals span { padding: 4px 2px; text-align: center; border-radius: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vals span.sb { box-shadow: inset 2px 0 0 var(--ink); }
+
+/* embeddings compare */
+.emb-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .emb-pair { grid-template-columns: 1fr; } }
+.emb-one { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.emb-one canvas { width: 100%; image-rendering: pixelated; border-radius: 4px; background: var(--sunken); }
+.emb-one .who { font-size: 13px; color: var(--ink-2); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.emb-one .who b { font-family: var(--font-mono); color: var(--ink); font-size: 14px; }
+.tok-tag { font-family: var(--font-ui); font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 3px; background: var(--ink); color: var(--ground); }
+.cos { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.cos .big { font-size: 40px; font-weight: 750; font-stretch: 110%; line-height: 1; }
+.cos p { color: var(--ink-2); font-size: 13px; max-width: 60ch; }
+
+.tip { position: fixed; z-index: 50; pointer-events: none; background: var(--tip-bg); color: var(--tip-ink); font-size: 12px; line-height: 1.45; padding: 8px 10px; border-radius: 6px; max-width: min(380px, calc(100vw - 24px)); box-shadow: 0 6px 24px rgb(0 0 0 / .18); }
+.tip b { font-weight: 650; }
+.tip .m { color: var(--tip-muted); }
+.tip code { font-family: var(--font-mono); font-size: 11px; }
+.tip .ws { opacity: .6; }
+.dropzone { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--ground) 86%, transparent); border: 3px dashed var(--ink); }
+.dropzone div { text-align: center; display: grid; gap: 6px; }
+.dropzone b { font-size: 26px; font-stretch: 115%; }
+.err { background: var(--err-bg); color: var(--err-ink); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
+.loading { color: var(--muted); font-size: 14px; }
+footer { border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+footer .wrap { padding-block: 18px 28px; display: grid; gap: 6px; }
+@media (prefers-reduced-motion: no-preference) { .bar { transition: width .35s ease; } }
+/* filters, sorting */
+.filterbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
+.filterbar:empty { display: none; }
+.fchip { display: inline-flex; align-items: center; gap: 4px; background: var(--ink); color: var(--ground); border-radius: 999px; padding: 2px 3px 2px 10px; font-size: 13px; }
+.fchip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 7px; border-radius: 999px; }
+.fchip button:hover { background: color-mix(in srgb, var(--ground) 25%, transparent); }
+.linkbtn { border: 0; background: none; color: var(--ink-2); text-decoration: underline; cursor: pointer; font: inherit; font-size: 13px; padding: 0; }
+.toggle { border: 1px solid var(--line-2); background: var(--surface); border-radius: 999px; padding: 4px 11px; font-size: 13px; cursor: pointer; color: var(--ink-2); }
+.toggle[aria-pressed="true"] { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.vl-head button, .sortable button { all: unset; cursor: pointer; }
+.vl-head button:focus-visible, .sortable button:focus-visible { outline: 2px solid var(--focus); }
+.vl-head [aria-sort] button::after, .sortable [aria-sort] button::after { content: " ↕"; color: var(--line-2); }
+.vl-head [aria-sort="ascending"] button::after, .sortable [aria-sort="ascending"] button::after { content: " ↑"; color: var(--ink); }
+.vl-head [aria-sort="descending"] button::after, .sortable [aria-sort="descending"] button::after { content: " ↓"; color: var(--ink); }
+.bar-row.clickable { cursor: pointer; border-radius: 6px; }
+.bar-row.clickable:hover { background: var(--sunken); }
+.bar-row[aria-current="true"] { background: var(--sunken); box-shadow: inset 3px 0 0 var(--ink); }
+.hint { font-size: 12px; color: var(--muted); }
+.h-line { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; }
+.h-line .ib { margin-left: 0; }
+.xi-line { display: flex; gap: 8px; align-items: baseline; }
+.xi-line > :last-child { flex: 1; min-width: 0; }
+.strip-top .ib { position: absolute; right: 0; bottom: 0; }
+#p-embed[data-mode="meaning"] .ib-embed, #p-embed:not([data-mode="meaning"]) .ib-meaning { display: none; }
+.lang { flex: none; }
+.foot-line { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.svg-host .pick { cursor: pointer; }
+.svg-host .pick:hover { opacity: .8; }
+
+/* nearest neighbours */
+.progress { height: 6px; background: var(--sunken); border-radius: 3px; overflow: hidden; max-width: 560px; }
+.progress div { height: 100%; width: 0; background: var(--c-ffn); }
+.nn-list { display: grid; gap: 2px; }
+.nn-row { display: grid; grid-template-columns: 2em minmax(6em, 13em) minmax(40px, 1fr) 3.4em; gap: 10px; align-items: center; border: 0; background: none; text-align: left; padding: 4px 6px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--ink); width: 100%; }
+.nn-row:hover { background: var(--sunken); }
+.nn-row.q { background: var(--sunken); }
+.nn-row .rk { color: var(--muted); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.nn-row .w { font-family: var(--font-mono); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nn-row .w .ws { color: var(--muted); }
+.nn-row .bt { height: 12px; display: flex; align-items: center; }
+.nn-row .bt i { display: block; height: 12px; background: var(--c-ffn); border-radius: 0 3px 3px 0; min-width: 2px; }
+.nn-row .v { font-size: 12px; color: var(--ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+.nnmap svg { display: block; width: 100%; height: auto; }
+.nnmap .pt { cursor: pointer; }
+.nnmap text { font: 12px var(--font-mono); fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.nnmap .q text { font-weight: 700; font-size: 14px; }
+
+/* data flow */
+.chain { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+.chain .st { display: grid; gap: 3px; align-content: start; border: 1px solid var(--line-2); background: var(--surface); border-radius: 8px; padding: 10px 12px; min-width: 112px; flex: 1 1 120px; text-align: left; font: inherit; color: var(--ink); }
+.chain button.st { cursor: pointer; }
+.chain button.st:hover { border-color: var(--ink-2); }
+.chain .st b { font-size: 14px; font-stretch: 106%; }
+.chain .st span { font-size: 12px; color: var(--ink-2); line-height: 1.35; }
+.chain .st code { font-family: var(--font-mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.chain .ar { align-self: center; color: var(--muted); font-size: 18px; }
+.chain .st.blocks { flex: 4 1 320px; }
+.bstrip { display: grid; grid-template-columns: repeat(auto-fill, minmax(13px, 1fr)); gap: 2px; margin-top: 6px; }
+.bstrip button { height: 20px; border: 0; border-radius: 3px; cursor: pointer; padding: 0; }
+.bstrip button[aria-current="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); position: relative; z-index: 1; }
+.flow-wrap { overflow-x: auto; }
+.flow svg { display: block; max-width: 100%; height: auto; }
+.flow .node.w { cursor: pointer; }
+.flow .node.w:hover rect { stroke-width: 2.6; }
+.flow text { font: 12px var(--font-ui); fill: var(--ink); }
+.flow text.t1 { font: 600 12.5px var(--font-mono); }
+.flow text.t1.op { font: 650 13px var(--font-ui); }
+.flow text.t2 { font-size: 11px; fill: var(--ink-2); }
+.flow .edge { fill: none; stroke: var(--ink-2); stroke-width: 1.4; }
+.flow .edge.skip { stroke: var(--muted); stroke-dasharray: 5 4; }
+.flow .lane { font-size: 11px; fill: var(--muted); }
+.order-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .order-grid { grid-template-columns: 1fr; } }
+.order-list { margin: 0; padding-left: 2em; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); display: grid; gap: 3px; }
+.order-list li::marker { color: var(--muted); font-size: 11px; }
+.order-list .x { color: var(--muted); font-family: var(--font-ui); font-size: 11.5px; }
+
+/* tour */
+.tour { position: fixed; inset: 0; z-index: 80; background: var(--ground); color: var(--ink); display: grid; grid-template-rows: auto 1fr auto; }
+.tour-top, .tour-nav { display: flex; align-items: center; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) clamp(16px, 4vw, 40px) 10px; border-bottom: 1px solid var(--line); }
+.tour-nav { padding: 10px clamp(16px, 4vw, 40px) calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); border-bottom: 0; justify-content: space-between; }
+.tour-brand { font-weight: 800; font-stretch: 120%; white-space: nowrap; }
+.tour-dots { display: flex; gap: 6px; flex: 1; justify-content: center; flex-wrap: wrap; }
+.tour-dots button { width: 30px; height: 6px; border-radius: 3px; border: 0; background: var(--line-2); cursor: pointer; padding: 0; }
+.tour-dots button[aria-current="true"] { background: var(--ink); }
+.tour-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tour-stage { overflow: auto; padding: clamp(20px, 4vh, 44px) clamp(16px, 6vw, 96px); }
+.tour-stage .inner { max-width: 1240px; margin: 0 auto; display: grid; gap: 22px; }
+.t-eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.t-title { font-size: clamp(28px, 4.2vw, 52px); font-weight: 780; font-stretch: 112%; line-height: 1.08; letter-spacing: -0.015em; text-wrap: balance; margin: 0; }
+.t-lede { font-size: clamp(16px, 1.6vw, 20px); color: var(--ink-2); max-width: 72ch; line-height: 1.5; }
+.t-lede b { color: var(--ink); }
+.t-input { width: 100%; font: 500 clamp(20px, 2.6vw, 32px)/1.35 var(--font-ui); padding: 16px 18px; border: 2px solid var(--line-2); border-radius: 12px; background: var(--surface); resize: vertical; min-height: 2.8em; color: var(--ink); }
+.t-flow { display: flex; flex-wrap: wrap; gap: 12px 6px; }
+.t-flow .tk { padding: 6px 9px 4px; }
+.t-flow .tk .tt { font-size: clamp(20px, 2.6vw, 34px); }
+.t-flow .tk small { font-size: 13px; }
+.t-big { display: flex; flex-wrap: wrap; gap: 14px 44px; }
+.t-big > div { display: grid; }
+.t-big b { font-size: clamp(30px, 4vw, 54px); font-weight: 780; font-stretch: 110%; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.t-big span { color: var(--ink-2); font-size: 14px; }
+.t-rows { display: grid; gap: 10px; }
+.t-row { display: grid; grid-template-columns: minmax(7em, 12em) minmax(0, 1fr); gap: 16px; align-items: center; }
+.t-row .lbl { font-family: var(--font-mono); font-size: clamp(15px, 1.5vw, 19px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-row .lbl small { display: block; font-family: var(--font-ui); font-size: 12px; color: var(--muted); }
+.t-row .lbl .ws { color: var(--muted); }
+.t-row .vec { display: grid; gap: 3px; min-width: 0; }
+.t-row canvas { width: 100%; height: 26px; border-radius: 3px; image-rendering: pixelated; background: var(--sunken); display: block; }
+.t-row .nums { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t-note { font-size: 15px; color: var(--ink-2); background: var(--sunken); border-radius: 10px; padding: 12px 16px; max-width: 86ch; }
+.t-note b { color: var(--ink); }
+.t-matrix { width: 100%; image-rendering: pixelated; border-radius: 6px; display: block; background: var(--sunken); }
+.t-mx { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 12px; align-items: stretch; }
+.t-mx .labs { display: grid; font-family: var(--font-mono); font-size: 13px; color: var(--ink-2); }
+.t-mx .labs span { display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; }
+.t-split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 900px) { .t-split { grid-template-columns: 1fr; } }
+.t-pipe { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.t-pipe .box { border: 2px solid var(--line-2); border-radius: 12px; padding: 14px 18px; background: var(--surface); display: grid; gap: 4px; min-width: 150px; flex: 1 1 160px; }
+.t-pipe .box b { font-size: clamp(16px, 1.6vw, 20px); }
+.t-pipe .box span { font-size: 13px; color: var(--ink-2); }
+.t-pipe .box code { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.t-pipe .ar { font-size: 26px; color: var(--muted); }
+.dict svg { display: block; width: 100%; height: auto; }
+.dict text { font: 13px var(--font-mono); fill: var(--ink); paint-order: stroke; stroke: var(--ground); stroke-width: 4px; }
+.dict .ax { font: 12px var(--font-ui); fill: var(--muted); stroke: none; }
+@media (prefers-reduced-motion: no-preference) { .tour-stage .inner { animation: tourIn .22s ease both; } }
+@keyframes tourIn { from { opacity: .35; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* word calculator */
+.calc-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.calc-row input { width: 9.5em; padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); font-family: var(--font-mono); font-size: 15px; }
+.calc-row .op { font-size: 22px; font-weight: 700; color: var(--ink-2); width: 1em; text-align: center; }
+.chk { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.eq { display: grid; gap: 8px; align-content: start; }
+.eq-row { display: grid; grid-template-columns: 1.4em minmax(5em, 9em) minmax(0, 1fr); gap: 10px; align-items: center; }
+.eq-row .op { font-size: 20px; font-weight: 700; color: var(--ink-2); text-align: center; }
+.eq-row .w { font-family: var(--font-mono); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eq-row canvas { width: 100%; height: 24px; border-radius: 3px; image-rendering: pixelated; background: var(--sunken); display: block; }
+.eq-row.sum { border-top: 2px solid var(--line-2); padding-top: 8px; }
+
+/* word map */
+.wm-bar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.wm-vp { position: relative; height: min(72vh, 680px); min-height: 340px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.wm-vp canvas { position: absolute; inset: 0; cursor: grab; touch-action: none; }
+.wm-vp canvas:active { cursor: grabbing; }
+.wm-pos { font-size: 12px; }
+.wm-foot { display: grid; gap: 8px; margin-top: 10px; }
+.wm-sel { min-height: 1.5em; }
+.wm-sel .linkbtn { font-size: 13px; }
+
+/* blueprint */
+.bp { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: stretch; }
+@media (max-width: 860px) { .bp { grid-template-columns: 1fr; } .bp-ar { transform: rotate(90deg); justify-self: center; } }
+.bp-col { border: 1px solid var(--line-2); background: var(--surface); border-radius: 10px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+.bp-col > b { font-size: 15px; font-stretch: 108%; }
+.bp-col > span { font-size: 13px; color: var(--ink-2); }
+.bp-col ul { margin: 4px 0 0; padding-left: 1.1em; display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.bp-col li b { color: var(--ink); }
+.bp-col li.x { color: var(--muted); list-style: '✕  '; }
+.bp-col code, .bp-list code { font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
+.bp-ar { align-self: center; font-size: 26px; color: var(--muted); }
+.bp-list { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; font-size: 13.5px; color: var(--ink-2); }
+/* server bar */
+.srv-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.srv-bar label { color: var(--ink-2); }
+.srv-bar select { padding: 5px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); max-width: 100%; }
+.srv-bar #srvModel { min-width: 0; flex: 1 1 260px; max-width: 520px; }
+.srv-bar > * { min-width: 0; max-width: 100%; }
+.srv-bar select { min-width: 0; max-width: 100%; }
+.srv-bar code { overflow-wrap: anywhere; }
+.srv-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c-lin); }
+/* full map */
+.fm-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+.fm-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.fchipT { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 999px; padding: 2px 9px; font-size: 12.5px; cursor: pointer; color: var(--ink-2); }
+.fchipT i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.fchipT small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.fchipT[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
+.fm-vp { position: relative; height: min(76vh, 760px); min-height: 360px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.fm-vp canvas { position: absolute; inset: 0; cursor: grab; touch-action: none; }
+.fm-vp canvas.fm-lens { pointer-events: none; cursor: auto; }
+.fm-pos { margin-top: 6px; }
+.fm-dims { display: grid; gap: 8px; margin-bottom: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.fm-dim { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-right: 16px; font-size: 13px; }
+.fm-dim input[type="number"] { width: 6em; padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); font-family: var(--font-mono); }
+.fm-dim input[type="range"] { width: min(420px, 60vw); }
+.fm-dim button { border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+.fm-dimstats p { margin: 2px 0; }
+.fm-axsrc { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fm-dim select { padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.fm-pca-sum { margin: 2px 0 6px; font-size: 13px; max-width: 80ch; }
+.fm-pca-bars { display: block; max-width: 100%; }
+.fm-leg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.fm-leg i { display: inline-block; width: min(180px, 40vw); height: 10px; border-radius: 5px; background: linear-gradient(90deg, var(--div-neg), var(--div-mid), var(--div-pos)); border: 1px solid var(--line); }
+/* Rechenweg (llama.cpp source) */
+:root { --syn-str: #1a7a4f; --syn-num: #6046c4; --syn-op: #b0501a; --syn-ref: #1d5fb0; --syn-enum: #9c3f73; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --syn-str: #62d29e; --syn-num: #ab9dff; --syn-op: #f0904f; --syn-ref: #79b4ff; --syn-enum: #e8a0c8; } }
+:root[data-theme="dark"] { --syn-str: #62d29e; --syn-num: #ab9dff; --syn-op: #f0904f; --syn-ref: #79b4ff; --syn-enum: #e8a0c8; }
+.ll-bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; margin-bottom: 10px; }
+.ll-bar select { padding: 6px 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); max-width: 100%; }
+.ll-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .ll-grid { grid-template-columns: minmax(0, 1fr); } }
+.ll-steps { display: grid; gap: 1px; max-height: 78vh; overflow: auto; padding: 10px 8px; align-content: start; }
+.ll-sum { margin: 2px 6px 8px; font-size: 13px; color: var(--ink-2); }
+.ll-shape { white-space: nowrap; }
+.ll-st { display: grid; grid-template-columns: 12px minmax(0, 1fr); column-gap: 8px; text-align: left; border: 0; background: transparent; border-radius: 8px; padding: 5px 8px; cursor: pointer; font: inherit; color: var(--ink); }
+.ll-ctl { display: block; text-align: left; border: 0; background: transparent; border-radius: 8px; padding: 7px 8px 3px; cursor: pointer; font: inherit; font-weight: 650; font-size: 13px; color: var(--ink-2); }
+.ll-st:hover, .ll-ctl:hover { background: var(--sunken); }
+.ll-st[aria-current="true"], .ll-ctl[aria-current="true"] { background: color-mix(in srgb, var(--c, var(--c-other)) 16%, transparent); }
+.ll-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); margin-top: 5px; grid-row: span 3; }
+.ll-lab { font-size: 13.5px; }
+.ll-st.call .ll-lab { font-weight: 650; }
+.ll-meta { grid-column: 2; font-size: 12px; color: var(--muted); }
+.ll-st small, .ll-ctl small { grid-column: 2; display: block; font-family: var(--font-mono); font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.ll-st.shape { display: none; }
+.show-shape .ll-st.shape { display: grid; opacity: .75; }
+.ll-tref { font-family: var(--font-mono); text-decoration: underline dotted; }
+.ll-code-wrap { padding: 0; overflow: hidden; display: grid; }
+.ll-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.ll-code { margin: 0; position: relative; max-height: 74vh; overflow: auto; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; padding: 8px 0; font-variant-ligatures: none; tab-size: 4; color: var(--ink); }
+.ll-code .ln { display: block; white-space: pre; padding-right: 16px; min-width: max-content; }
+.ll-code .ln i { display: inline-block; width: 4.4em; padding-right: 1em; text-align: right; color: var(--muted); font-style: normal; user-select: none; }
+.ll-code .ln.in { background: var(--sunken); }
+.ll-code .ln.hit { background: color-mix(in srgb, var(--c-emb) 26%, transparent); }
+.c-cm { color: var(--muted); font-style: italic; }
+.c-str { color: var(--syn-str); }
+.c-num { color: var(--syn-num); }
+.c-kw { font-weight: 650; }
+.c-enum { color: var(--syn-enum); }
+.c-op { color: var(--syn-op); }
+.c-call { color: var(--ink-2); }
+.c-ref { color: var(--syn-ref); text-decoration: underline; cursor: pointer; }
+.c-fn { color: var(--syn-op); font-weight: 650; text-decoration: underline dotted; cursor: pointer; }
+#codeChain a.st { text-decoration: none; color: inherit; }
+#codeChain .st { max-width: 100%; min-width: 0; }
+#codeChain .st b { overflow-wrap: anywhere; }
+/* Durchlauf */
+.ib { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2); font: italic 600 12px/1 Georgia, serif; cursor: pointer; vertical-align: middle; padding: 0; margin-left: 4px; }
+.ib:hover { border-color: var(--ink-2); color: var(--ink); }
+.info-pop { position: fixed; z-index: 60; background: var(--surface); color: var(--ink); border: 1px solid var(--line-2); border-radius: 10px; padding: 12px 14px; font-size: 13.5px; line-height: 1.5; box-shadow: 0 8px 28px rgb(0 0 0 / .16); }
+.run-head { display: grid; gap: 8px; }
+.run-note { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; line-height: 1.5; }
+.run-note .btn { margin-left: 6px; }
+.run-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.run-form input[type="text"] { flex: 1 1 320px; min-width: 0; font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.run-form .btn.primary { padding: 10px 16px; font-size: 15px; }
+.run-opts { font-size: 13px; color: var(--ink-2); min-width: 0; max-width: 100%; }
+.run-opts summary { cursor: pointer; }
+.run-opts > div { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding-top: 6px; }
+.run-opts label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; max-width: 100%; min-width: 0; }
+.run-opts select { min-width: 0; width: auto; max-width: min(100%, 78vw); padding: 4px 6px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); max-width: 100%; }
+.rt-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-bottom: 6px; }
+.rt-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.rt { display: inline-grid; justify-items: center; gap: 1px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 13px; cursor: pointer; color: var(--ink); max-width: 100%; }
+.rt span { font-family: var(--font-mono); font-variant-ligatures: none; white-space: pre; }
+.rt small { font-size: 10.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.rt.ans { background: color-mix(in srgb, var(--c-head) 16%, var(--surface)); border-color: color-mix(in srgb, var(--c-head) 55%, var(--line-2)); }
+.rt.sp span { color: var(--muted); }
+.rt.sel { outline: 2.5px solid var(--ink); outline-offset: 1px; }
+.rt.end { cursor: default; color: var(--muted); align-content: center; }
+.run-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; margin-top: 14px; align-items: start; }
+.run-side { display: grid; gap: 16px; }
+.run-grid figure, .run-grid2 > section { margin: 0; }
+.run-grid figcaption, .run-sec-h { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 8px; font-size: 14px; }
+.run-grid figcaption b { font-size: 14.5px; }
+.seg.sm button { padding: 3px 9px; font-size: 12px; }
+#runStackCv { display: block; cursor: grab; touch-action: none; max-width: 100%; }
+#runPlaneCv { display: block; cursor: crosshair; image-rendering: pixelated; max-width: 100%; }
+.run-layer { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-top: 6px; }
+.run-layer input { flex: 1; }
+.run-layer output { min-width: 13em; font-variant-numeric: tabular-nums; }
+#runDimSvg { display: block; max-width: 100%; cursor: pointer; }
+svg .ax { font-size: 10.5px; fill: var(--muted); font-family: var(--font-ui); }
+.lens-l { margin: 0 0 4px; font-size: 13px; color: var(--ink-2); }
+.lens-top, .out-top { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 3px; }
+.lens-top li, .out-top li { display: grid; grid-template-columns: minmax(0, 9em) 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
+.lens-top li span, .out-top li span { white-space: pre; overflow: hidden; text-overflow: ellipsis; font-variant-ligatures: none; }
+.lens-top li i, .out-top li i { display: block; height: 10px; border-radius: 0 3px 3px 0; background: var(--c-head); opacity: .55; }
+.lens-top li.hit i, .out-top li.hit i { opacity: 1; }
+.lens-top li.hit span, .out-top li.hit span { font-weight: 650; }
+.lens-top li b, .out-top li b { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.lens-curve { display: block; max-width: 100%; cursor: pointer; }
+.run-sec { margin-top: 18px; }
+.run-sec h3, .run-grid2 h3 { font-size: 15px; margin: 0 0 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.run-flow { display: flex; flex-wrap: wrap; gap: 6px 4px; align-items: center; }
+.rf { display: grid; gap: 1px; text-align: left; border: 1px solid var(--line-2); border-left: 4px solid var(--c); background: var(--surface); border-radius: 7px; padding: 5px 9px; font: inherit; cursor: pointer; color: var(--ink); max-width: 100%; }
+.rf b { font-size: 13px; font-weight: 600; }
+.rf small { font-size: 11px; color: var(--muted); }
+.rf em { font-style: normal; font-size: 11px; color: var(--ink-2); }
+.rf.sel { background: color-mix(in srgb, var(--c) 16%, var(--surface)); outline: 2px solid var(--ink); }
+.rf-ar { color: var(--muted); font-size: 13px; }
+.rf-nav { margin-left: 8px; }
+.run-ex { display: grid; gap: 8px; }
+.run-ex-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px; }
+.run-ex-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 8px; }
+.run-ex-card { display: grid; gap: 3px; text-align: left; border: 1px solid var(--line-2); background: var(--surface); border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; color: var(--ink); }
+.run-ex-card b { font-size: 14px; }
+.run-ex-card small { color: var(--muted); font-size: 12px; }
+.run-ex-card[aria-current="true"] { outline: 2px solid var(--ink); outline-offset: 1px; }
+.run-miss { margin-top: 14px; background: var(--surface); border: 1px dashed var(--line-2); border-radius: 10px; padding: 14px; font-size: 14px; display: grid; gap: 8px; }
+.run-miss .rt-list { gap: 4px; }
+.rt.has { box-shadow: inset 0 -3px 0 var(--c-lin); }
+.rf-tail { flex-basis: 100%; font-size: 12.5px; color: var(--ink-2); font-weight: 600; margin-top: 4px; }
+.run-detail { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 6px; }
+.rd-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.rd-stripe { display: block; cursor: crosshair; max-width: 100%; }
+.rd-hint { margin: 0; }
+.rd-zoom { border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 6px; font-size: 13.5px; }
+.zz-f, .zz-big, .zz-sum { margin: 0; }
+.zz-big { font-family: var(--font-mono); font-size: 14px; overflow-wrap: anywhere; }
+.zz-sum { font-variant-numeric: tabular-nums; }
+.zz-two { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.zz-terms { width: auto; max-width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.zz-terms th { text-align: left; font-weight: 600; color: var(--ink-2); padding: 2px 8px 2px 0; border-bottom: 1px solid var(--line); }
+.zz-terms td { padding: 2px 8px 2px 0; }
+.zz-bar { width: 90px; }
+.zz-bar i { display: block; height: 9px; border-radius: 2px; }
+.zz-curve { display: block; max-width: 100%; }
+.run-grid2 { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; margin-top: 16px; align-items: start; }
+.at-heads { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; margin-bottom: 8px; }
+.toggle.sm { padding: 1px 6px; font-size: 11px; min-width: 2em; }
+.at-row { display: flex; flex-wrap: wrap; gap: 3px; align-items: flex-end; }
+.at { display: grid; grid-template-rows: 60px auto; justify-items: center; gap: 2px; border: 0; background: transparent; padding: 0 2px; cursor: pointer; font: inherit; color: var(--ink); }
+.at i { align-self: end; width: 14px; background: var(--c-attn); border-radius: 2px 2px 0 0; min-height: 1px; }
+.at span { font-size: 11.5px; white-space: pre; font-variant-ligatures: none; }
+.at.self span { font-weight: 700; text-decoration: underline; }
+.lm { display: grid; gap: 3px; margin-bottom: 8px; }
+.lm-bars { display: flex; align-items: flex-end; gap: 2px; height: 48px; border-bottom: 1px solid var(--line-2); }
+.lm-bars i { flex: 1; min-width: 2px; border-radius: 2px 2px 0 0; }
+@media (max-width: 900px) { .run-grid, .run-grid2 { grid-template-columns: minmax(0, 1fr); } .run-layer output { min-width: 0; } }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><circle cx="12.5" cy="12.5" r="9" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M19.5 19.5 27 27" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><rect x="7" y="10" width="2.5" height="5" rx="1" fill="var(--c-attn)"/><rect x="10.5" y="8" width="2.5" height="9" rx="1" fill="var(--c-ffn)"/><rect x="14" y="11" width="2.5" height="3" rx="1" fill="var(--c-lin)"/></svg>
+      <div><b>GGUF-Lupe</b><br><span data-en="What’s inside an AI model file">Was in einer KI-Modelldatei steckt</span></div>
+    </div>
+    <div class="seg sm lang" role="group" aria-label="Sprache · Language"><button type="button" data-lang="de" aria-pressed="false" title="Deutsch">DE</button><button type="button" data-lang="en" aria-pressed="false" title="English">EN</button></div>
+    <button type="button" class="btn" id="tourBtn" title="Vollbild: dein Satz Schritt für Schritt durch das Modell" data-en-title="Full screen: your sentence step by step through the model" data-en="▶ Tour">▶ Rundgang</button>
+    <span class="drop-hint" data-en="Drop a .gguf file here or">.gguf-Datei hierher ziehen oder</span>
+    <button type="button" class="btn primary" id="openBtn" data-en="Open file …">Datei öffnen …</button>
+    <input type="file" id="fileInput" accept=".gguf">
+  </div>
+</header>
+
+<div class="filebar">
+  <div class="wrap">
+    <div id="errBox" class="err" hidden></div>
+    <div class="file-line"><h1 id="fileName">…</h1><span id="modePill" class="pill">–</span></div>
+    <p class="readstat" id="readStat"></p>
+    <div class="srv-bar" id="srvBar" hidden></div>
+  </div>
+</div>
+
+<nav class="maintabs" aria-label="Bereiche" data-en-aria-label="Areas">
+  <div class="wrap">
+    <div class="areas" role="group" aria-label="Bereich" data-en-aria-label="Area">
+      <button type="button" data-area="reader" aria-pressed="true" data-en="<b>GGUF reader</b><small>What’s in the file?</small>"><b>GGUF-Reader</b><small>Was steht in der Datei?</small></button>
+      <button type="button" data-area="arch" aria-pressed="false" data-en="<b>Architecture</b><small>How does the model compute?</small>"><b>Architektur</b><small>Wie rechnet das Modell?</small></button>
+    </div>
+    <div class="tabrow" role="tablist">
+      <button role="tab" id="t-overview" aria-controls="p-overview" aria-selected="true" data-area="reader"><span data-en="Overview">Überblick</span></button>
+      <button role="tab" id="t-tokens" aria-controls="p-tokens" aria-selected="false" data-area="reader"><span data-en="Tokens">Tokens</span> <small id="nVocab"></small></button>
+      <button role="tab" id="t-embed" aria-controls="p-embed" aria-selected="false" data-area="reader"><span data-en="Embedding table">Embedding-Tabelle</span></button>
+      <button role="tab" id="t-weights" aria-controls="p-weights" aria-selected="false" data-area="reader"><span data-en="Weights">Gewichte</span></button>
+      <button role="tab" id="t-tensors" aria-controls="p-tensors" aria-selected="false" data-area="reader"><span data-en="Tensors">Tensoren</span> <small id="nTensors"></small></button>
+      <button role="tab" id="t-meta" aria-controls="p-meta" aria-selected="false" data-area="reader"><span data-en="Metadata">Metadaten</span> <small id="nMeta"></small></button>
+      <button role="tab" id="t-flow" aria-controls="p-flow" aria-selected="false" data-area="arch" hidden><span data-en="Data flow">Datenfluss</span></button>
+      <button role="tab" id="t-run" aria-controls="p-run" aria-selected="false" data-area="arch" hidden><span data-en="Forward pass">Durchlauf</span></button>
+      <button role="tab" id="t-meaning" aria-controls="p-embed" aria-selected="false" data-area="arch" hidden><span data-en="Meaning">Bedeutung</span></button>
+      <button role="tab" id="t-code" aria-controls="p-code" aria-selected="false" data-area="arch" hidden><span data-en="Code path">Rechenweg</span></button>
+      <button type="button" class="tab-tour" id="tourTab" data-area="arch" hidden data-en="▶ Tour">▶ Rundgang</button>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <!-- ÜBERBLICK -->
+  <div class="wrap pane" role="tabpanel" id="p-overview" aria-labelledby="t-overview">
+    <section>
+      <div id="ovExplain" hidden></div>
+      <div class="panel strip-panel">
+        <div class="strip-top"><span class="hdr-callout" id="hdrCallout"></span><button type="button" class="ib" data-info-el="ovExplain" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div>
+        <canvas id="strip" aria-label="Karte der Datei: Header und Tensoren in Dateireihenfolge, eingefärbt nach Komponente" data-en-aria-label="Map of the file: header and tensors in file order, colored by component"></canvas>
+        <div class="axis" id="stripAxis"></div>
+        <div class="legend" id="compLegend"></div>
+      </div>
+      <dl class="facts" id="facts"></dl>
+    </section>
+    <section aria-labelledby="h-bytes">
+      <div class="sec-head"><p class="eyebrow" data-en="Storage">Speicher</p><h2 id="h-bytes" data-en="Where the bytes go">Wohin die Bytes gehen</h2></div>
+      <div class="grid2">
+        <figure class="panel"><figcaption data-en="<b>By component</b> · share of all bytes"><b>Nach Komponente</b> · Anteil an allen Bytes</figcaption><div class="bars" id="compBars"></div></figure>
+        <figure class="panel"><figcaption data-en="<b>By quantization type</b> · bits per weight"><b>Nach Quantisierungstyp</b> · Bit pro Gewicht</figcaption><div class="bars" id="typeBars"></div></figure>
+      </div>
+    </section>
+    <section aria-labelledby="h-layers">
+      <div class="layer-head">
+        <div class="sec-head"><p class="eyebrow" data-en="Architecture">Architektur</p><div class="h-line"><h2 id="h-layers" data-en="Layer stack">Schichtenstapel</h2><button type="button" class="ib" data-info-el="layerLede" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div><div id="layerLede" hidden></div></div>
+        <div class="seg" role="group" aria-label="Färbung" data-en-aria-label="Coloring">
+          <button type="button" id="lmComp" aria-pressed="true" data-en="By component">Nach Komponente</button>
+          <button type="button" id="lmBits" aria-pressed="false" data-en="By bits per weight">Nach Bit pro Gewicht</button>
+        </div>
+      </div>
+      <div class="panel" style="display:grid;gap:10px">
+        <div class="legend" id="layerLegend"></div>
+        <div class="scroll-x" id="layerChart"></div>
+        <p class="count" id="layerFoot"></p>
+      </div>
+    </section>
+  </div>
+
+  <!-- TOKENS -->
+  <div class="wrap pane" role="tabpanel" id="p-tokens" aria-labelledby="t-tokens" hidden>
+    <section>
+      <div id="tokExplain" hidden></div>
+      <div class="subtabs">
+        <div class="seg" role="group" aria-label="Ansicht" data-en-aria-label="View">
+          <button type="button" data-sub="split" aria-pressed="true" data-en="Split text">Text zerlegen</button>
+          <button type="button" data-sub="vocab" aria-pressed="false" data-en="Vocabulary">Wörterbuch</button>
+          <button type="button" data-sub="merges" aria-pressed="false" data-en="Merge rules">Merge-Regeln</button>
+          <button type="button" data-sub="special" aria-pressed="false" data-en="Special tokens">Spezial-Tokens</button>
+        </div>
+        <button type="button" class="ib" data-info-el="tokExplain" aria-label="Erklärung" data-en-aria-label="Explanation">i</button>
+      </div>
+    </section>
+
+    <div id="ts-split" style="display:grid;gap:28px">
+      <section>
+        <label class="cap" for="tokText" data-en="<b>Your text</b>"><b>Dein Text</b></label>
+        <textarea id="tokText" class="tok-input" spellcheck="false"></textarea>
+        <div class="quick" id="tokExamples"></div>
+        <div id="tokUnsupported" class="note" hidden></div>
+      </section>
+      <section id="tokOut">
+        <div class="tok-stats" id="tokStats"></div>
+        <div class="panel" style="display:grid;gap:12px">
+          <p class="cap"><span data-en="<b>How the model sees your text</b>"><b>So sieht das Modell deinen Text</b></span><button type="button" class="ib" data-info="tokFlow" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></p>
+          <div class="tok-flow" id="tokFlow"></div>
+        </div>
+        <div style="display:grid;gap:6px"><p class="cap" data-en="<b>What the model gets</b>: just these numbers"><b>Was das Modell bekommt</b>: nur diese Zahlen</p><div class="ids" id="tokIds"></div></div>
+        <div class="panel tok-detail" id="tokDetail"></div>
+      </section>
+      <section>
+        <div class="sec-head"><p class="eyebrow">Byte-Pair-Encoding</p><div class="h-line"><h2 data-en="How a word is put together">Wie ein Wort zusammengesetzt wird</h2><button type="button" class="ib" data-info="bpe" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div></div>
+        <div class="wordpick" id="wordPick"></div>
+        <div class="panel steps" id="bpeSteps"></div>
+      </section>
+    </div>
+
+    <div id="ts-vocab" style="display:grid;gap:20px" hidden>
+      <div class="grid2">
+        <figure class="panel"><figcaption data-en="<b>Scripts in the vocabulary</b> · tokens"><b>Schriften im Wörterbuch</b> · Tokens</figcaption><div class="bars" id="vocabScripts"></div></figure>
+        <figure class="panel"><figcaption data-en="<b>Token length</b> · characters per token"><b>Token-Länge</b> · Zeichen pro Token</figcaption><div class="svg-host" id="vocabLen"></div><p class="count" id="vocabLenNote"></p></figure>
+      </div>
+      <div class="tab-tools"><input id="vocabQ" type="search" placeholder="Text oder #ID, z. B. prüf" data-en-placeholder="Text or #ID, e.g. audit" aria-label="Wörterbuch durchsuchen" data-en-aria-label="Search the vocabulary"><button type="button" class="toggle" id="vocabWS" aria-pressed="false" data-en="Word starts only">Nur Wortanfänge</button><span class="count" id="vocabCount"></span></div>
+      <div class="catchips" id="vocabCats"></div>
+      <div class="filterbar" id="vocabFilters"></div>
+      <div class="vl" id="vocabList" tabindex="0"></div>
+    </div>
+
+    <div id="ts-merges" style="display:grid;gap:14px" hidden>
+      <figure class="panel"><figcaption><span data-en="<b>What is learned when?</b> · length of the glued pieces per section of the rule list"><b>Was wird wann gelernt?</b> · Länge der geklebten Stücke je Abschnitt der Regelliste</span><button type="button" class="ib" data-info="merges" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></figcaption><div class="svg-host" id="mergeChart"></div></figure>
+      <div class="tab-tools"><input id="mergeQ" type="search" placeholder="Ergebnis enthält …, z. B. Wirtschaft" data-en-placeholder="Result contains …, e.g. ation" aria-label="Merge-Regeln durchsuchen" data-en-aria-label="Search the merge rules"><span class="count" id="mergeCount"></span></div>
+      <div class="filterbar" id="mergeFilters"></div>
+      <div class="vl" id="mergeList" tabindex="0"></div>
+    </div>
+
+    <div id="ts-special" style="display:grid;gap:14px" hidden>
+      <div class="tbl-wrap"><table class="spec-tbl"><thead class="sortable" id="specHead"><tr><th class="r" aria-sort="ascending"><button type="button" data-sort="id">ID</button></th><th aria-sort="none"><button type="button" data-sort="tok">Token</button></th><th aria-sort="none"><button type="button" data-sort="type" data-en="Type">Art</button></th><th><span data-en="Purpose">Wofür</span><button type="button" class="ib" data-info="special" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></th></tr></thead><tbody id="specBody"></tbody></table></div>
+      <p class="count" id="specNote"></p>
+    </div>
+  </div>
+
+  <!-- EMBEDDING -->
+  <div class="wrap pane" role="tabpanel" id="p-embed" aria-labelledby="t-embed" hidden>
+    <section>
+      <div id="embExplain" hidden></div>
+      <div class="subtabs">
+        <div class="seg" role="group" aria-label="Ansicht" data-en-aria-label="View">
+          <button type="button" data-esub="table" aria-pressed="true" data-en="Table">Tabelle</button>
+          <button type="button" data-esub="nn" aria-pressed="false" data-en="Similar words">Ähnliche Wörter</button>
+          <button type="button" data-esub="calc" aria-pressed="false" data-en="Word arithmetic">Wort-Rechnen</button>
+          <button type="button" data-esub="map" aria-pressed="false" data-en="Map">Landkarte</button>
+          <button type="button" data-esub="cmp" aria-pressed="false" data-en="Compare two rows">Zwei Zeilen vergleichen</button>
+        </div>
+        <button type="button" class="ib ib-embed" data-info-el="embExplain" aria-label="Erklärung" data-en-aria-label="Explanation">i</button><button type="button" class="ib ib-meaning" data-info="meaning" aria-label="Erklärung" data-en-aria-label="Explanation">i</button>
+      </div>
+    </section>
+    <section id="es-table">
+      <div class="row-tools">
+        <div class="seg" role="group" aria-label="Zeilen" data-en-aria-label="Rows">
+          <button type="button" id="embModeText" aria-pressed="true" data-en="Tokens from your text">Tokens aus deinem Text</button>
+          <button type="button" id="embModeAll" aria-pressed="false" data-en="Whole table">Ganze Tabelle</button>
+        </div>
+        <div class="field" style="max-width:420px"><label for="embJump" data-en="Jump to">Springe zu</label><input id="embJump" type="search" placeholder="Wort oder #ID, z. B. König" data-en-placeholder="Word or #ID, e.g. King" autocomplete="off" spellcheck="false"></div>
+      </div>
+      <div class="chips" id="embFacts"></div>
+      <div id="embMsg" class="note" hidden></div>
+      <div class="mv" id="embView"></div>
+    </section>
+    <section id="es-nn" hidden>
+      <div class="row-tools">
+        <div class="field" style="max-width:420px"><label for="nnQ" data-en="Word">Wort</label><input id="nnQ" type="search" placeholder="z. B. König, Paris, Geld" data-en-placeholder="e.g. King, Paris, money" autocomplete="off" spellcheck="false"></div>
+        <button type="button" class="btn primary" id="nnGo" data-en="Find neighbors">Nachbarn suchen</button><button type="button" class="ib" data-info="nnCap" aria-label="Erklärung" data-en-aria-label="Explanation">i</button>
+      </div>
+      <div class="quick" id="nnExamples"></div>
+      <div class="progress" id="nnProg" hidden><div></div></div>
+      <p class="readline" id="nnStatus"></p>
+      <div class="grid2">
+        <figure class="panel" style="display:grid;gap:10px"><figcaption id="nnListCap" data-en="<b>Nearest neighbors</b>"><b>Nächste Nachbarn</b></figcaption><div class="nn-list" id="nnList"></div></figure>
+        <figure class="panel" style="display:grid;gap:10px"><figcaption><span data-en="<b>Meaning map</b> · two principal directions"><b>Bedeutungskarte</b> · zwei Hauptrichtungen</span><button type="button" class="ib" data-info="nnMap" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></figcaption><div class="nnmap" id="nnMap"></div></figure>
+      </div>
+    </section>
+    <section id="es-calc" hidden>
+      <div class="calc-row"><input id="calcA" value="King" aria-label="Wort A" data-en-aria-label="Word A" spellcheck="false"><span class="op">−</span><input id="calcB" value="man" aria-label="Wort B" data-en-aria-label="Word B" spellcheck="false"><span class="op">+</span><input id="calcC" value="woman" aria-label="Wort C" data-en-aria-label="Word C" spellcheck="false"><button type="button" class="btn primary" id="calcGo" data-en="Compute">Rechnen</button><button type="button" class="ib" data-info="calcCap" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div>
+      <div class="quick" id="calcEx"></div>
+      <label class="chk"><input type="checkbox" id="calcHide" checked> <span data-en="Hide input words (King, KING, king)">Eingabewörter ausblenden (King, KING, king)</span></label>
+      <div class="progress" id="calcProg" hidden><div></div></div>
+      <p class="readline" id="calcStatus"></p>
+      <div class="grid2">
+        <figure class="panel" style="display:grid;gap:10px;align-content:start"><figcaption data-en="<b>The arithmetic with real rows</b>"><b>Die Rechnung mit echten Zeilen</b></figcaption><div class="eq" id="calcEq"></div></figure>
+        <figure class="panel" style="display:grid;gap:10px"><figcaption data-en="<b>Result</b> · nearest rows"><b>Ergebnis</b> · nächste Zeilen</figcaption><div class="nn-list" id="calcList"></div></figure>
+      </div>
+    </section>
+    <section id="es-map" hidden>
+      <div class="progress" id="mapProg" hidden><div></div></div>
+      <div class="xi-line"><button type="button" class="ib" data-info="mapCap" aria-label="Erklärung" data-en-aria-label="Explanation">i</button><div class="readline" id="mapStatus"></div></div>
+      <div id="fullMapView" hidden></div>
+      <div id="mapView"></div>
+    </section>
+    <section class="panel" style="display:grid;gap:14px" id="es-cmp" hidden>
+      <div class="h-line"><h3 data-en="Compare two rows">Zwei Zeilen vergleichen</h3><button type="button" class="ib" data-info="cmp" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div>
+      <div class="emb-pair"><div class="emb-one" id="embA"></div><div class="emb-one" id="embB"></div></div>
+      <div class="cos" id="cosBox"></div>
+      <div class="quick" id="tokPresets"></div>
+    </section>
+  </div>
+
+  <!-- DATENFLUSS -->
+  <div class="wrap pane" role="tabpanel" id="p-flow" aria-labelledby="t-flow" hidden>
+    <section>
+      <div class="h-line"><h2 data-en="The path through the model">Der Weg durch das Modell</h2><button type="button" class="ib" data-info-el="flowExplain" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div><div id="flowExplain" hidden></div>
+      <div class="chain" id="flowChain"></div>
+    </section>
+    <section>
+      <div class="sec-head"><p class="eyebrow" data-en="One block in detail">Ein Block im Detail</p><div class="h-line"><h2 id="flowTitle">Block</h2><button type="button" class="ib" data-info-el="flowLede" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div><div id="flowLede" hidden></div></div>
+      <div class="panel flow-wrap"><div class="flow" id="flowDiagram"></div></div>
+      <p class="count" id="flowNote"></p>
+    </section>
+    <section>
+      <div class="sec-head"><p class="eyebrow" data-en="File or program?">Datei oder Programm?</p><div class="h-line"><h2 data-en="Where is the blueprint?">Wo steht der Bauplan?</h2><button type="button" class="ib" data-info-el="bpLede bpNote" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div><div id="bpLede" hidden></div></div>
+      <div class="bp" id="bpDiagram"></div>
+      <div class="order-grid">
+        <figure class="panel" style="display:grid;gap:8px"><figcaption data-en="<b>In the file</b>"><b>Steht in der Datei</b></figcaption><ul class="bp-list" id="bpFile"></ul></figure>
+        <figure class="panel" style="display:grid;gap:8px"><figcaption data-en="<b>In the program</b> (llama.cpp)"><b>Steht im Programm</b> (llama.cpp)</figcaption><ul class="bp-list" id="bpProg"></ul></figure>
+      </div>
+      <div id="bpNote" hidden></div>
+    </section>
+    <section>
+      <div class="sec-head"><p class="eyebrow" data-en="The proof in your file">Der Beweis in deiner Datei</p><div class="h-line"><h2 data-en="Is the order in the file?">Steht die Reihenfolge in der Datei?</h2><button type="button" class="ib" data-info="orderProof" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div>
+        <p class="lede" data-en="<b>No.</b> The order lives in the program.">Nein. Die Reihenfolge steht im Programm.</p></div>
+      <div class="order-grid">
+        <figure class="panel" style="display:grid;gap:8px"><figcaption id="orderFileCap"><b>Reihenfolge in der Datei</b></figcaption><ol class="order-list" id="orderFile"></ol></figure>
+        <figure class="panel" style="display:grid;gap:8px"><figcaption data-en="<b>Order when computing</b> (program’s blueprint)"><b>Reihenfolge beim Rechnen</b> (Bauplan im Programm)</figcaption><ol class="order-list" id="orderCalc"></ol></figure>
+      </div>
+    </section>
+  </div>
+
+  <!-- DURCHLAUF -->
+  <div class="wrap pane" role="tabpanel" id="p-run" aria-labelledby="t-run" hidden>
+    <section class="run-head">
+      <div class="run-ex" id="runEx" hidden></div>
+      <div class="run-note" id="runNote" hidden></div>
+      <form class="run-form" id="runForm" autocomplete="off" hidden>
+        <input id="runQ" type="text" maxlength="400" aria-label="Frage an das Modell" data-en-aria-label="Question for the model" placeholder="Frag das Modell etwas …" data-en-placeholder="Ask the model something …">
+        <button class="btn primary" id="runGo" type="submit" data-en="▶ Run">▶ Durchrechnen</button>
+        <button type="button" class="ib" data-info="run" aria-label="Erklärung" data-en-aria-label="Explanation">i</button>
+        <details class="run-opts"><summary data-en="Options">Optionen</summary><div>
+          <label title="mit der Chat-Vorlage des Modells" data-en-title="with the model’s chat template"><input type="checkbox" id="runChat" checked> <span data-en="as chat question">als Chat-Frage</span></label>
+          <label><span data-en="Answer at most">Antwort höchstens</span> <select id="runMax"><option>20</option><option>40</option><option selected>60</option><option>80</option></select> <span data-en="tokens">Tokens</span></label>
+          <label><span data-en="llama.cpp runs on">llama.cpp rechnet auf</span> <select id="runDev"></select></label>
+        </div></details>
+      </form>
+      <div class="progress" id="runProg" hidden><div></div></div>
+      <p class="readline" id="runStatus"></p>
+    </section>
+    <section id="runBody" hidden>
+      <div class="panel" id="runToks"></div>
+      <div class="run-miss" id="runMiss" hidden></div>
+      <div class="run-grid">
+        <figure class="panel">
+          <figcaption><b id="runStackTitle">Der Weg durch alle Schichten</b>
+            <span class="seg sm" id="runView" role="group" aria-label="Ansicht" data-en-aria-label="View"><button type="button" data-v="3d" aria-pressed="true" data-en="Stack">Stapel</button><button type="button" data-v="2d" aria-pressed="false" data-en="Flat">Flach</button></span>
+            <label class="count"><input type="checkbox" id="runSame"> <span data-en="same scale">gleiche Skala</span></label><button type="button" class="ib" data-info="scale" aria-label="Erklärung" data-en-aria-label="Explanation">i</button><button type="button" class="ib" data-info="stack" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></figcaption>
+          <canvas id="runStackCv" aria-label="Der Vektor des Tokens nach jeder Schicht als Stapel" data-en-aria-label="The token’s vector after each layer, as a stack"></canvas>
+          <div class="run-layer"><label for="runLayer" data-en="Layer">Schicht</label><input type="range" id="runLayer" min="0" max="64" value="64"><output id="runLayerOut"></output></div>
+        </figure>
+        <div class="run-side">
+          <figure class="panel"><figcaption><b id="runPlaneTitle">Schicht</b><button type="button" class="ib" data-info="plane" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></figcaption><canvas id="runPlaneCv" aria-label="Die gewählte Schicht, jedes Kästchen eine Dimension" data-en-aria-label="The chosen layer, each cell one dimension"></canvas><p class="count" id="runPlaneInfo"></p></figure>
+          <figure class="panel"><figcaption><b id="runDimTitle">Dimension</b><button type="button" class="ib" data-info="dim" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></figcaption><svg id="runDimSvg" role="img" aria-label="Verlauf einer Dimension durch die Schichten" data-en-aria-label="One dimension across the layers"></svg></figure>
+          <figure class="panel"><figcaption><b data-en="What the model would predict here">Was das Modell hier vorhersagen würde</b><button type="button" class="ib" data-info="lens" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></figcaption><div id="runLens"></div></figure>
+        </div>
+      </div>
+      <section class="run-sec"><h3 id="runBlockTitle">Block</h3><div class="run-flow" id="runFlow"></div><div class="run-detail" id="runDetail" hidden></div></section>
+      <div class="run-grid2">
+        <section class="panel"><h3 id="runAttnTitle">Aufmerksamkeit</h3><div id="runAttn"></div></section>
+        <section class="panel"><h3 id="runOutTitle">Das nächste Token</h3><div id="runOut"></div></section>
+      </div>
+    </section>
+  </div>
+
+  <!-- RECHENWEG -->
+  <div class="wrap pane" role="tabpanel" id="p-code" aria-labelledby="t-code" hidden>
+    <section>
+      <div class="h-line"><h2 data-en="The recipe in llama.cpp">Das Rezept in llama.cpp</h2><button type="button" class="ib" data-info-el="codeExplain" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div><div id="codeExplain" hidden></div>
+      <div class="chain" id="codeChain"></div>
+    </section>
+    <section>
+      <div class="ll-bar">
+        <div class="seg" role="group" aria-label="Teil des Programms" data-en-aria-label="Part of the program" id="codeParts"></div>
+        <div class="field"><label for="codeFile" data-en="Architecture">Architektur</label><select id="codeFile"></select></div>
+      </div>
+      <div class="ll-grid">
+        <div class="panel ll-steps" id="codeSteps"></div>
+        <div class="panel ll-code-wrap"><div class="ll-head" id="codeHead"></div><pre class="ll-code" id="codeView" tabindex="0"></pre></div>
+      </div>
+      <p class="count" id="codeLicense" style="margin-top:10px"></p>
+    </section>
+  </div>
+
+  <!-- GEWICHTE -->
+  <div class="wrap pane" role="tabpanel" id="p-weights" aria-labelledby="t-weights" hidden>
+    <section>
+      <div id="wExplain" hidden></div>
+      <div class="row-tools">
+        <div class="field"><label for="tensorPick">Tensor</label><input id="tensorPick" list="tensorNames" spellcheck="false" autocomplete="off"></div><button type="button" class="ib" data-info-el="wExplain" aria-label="Erklärung" data-en-aria-label="Explanation">i</button>
+        <datalist id="tensorNames"></datalist>
+      </div>
+      <div class="quick" id="quickPicks"></div>
+      <div class="chips" id="lupeInfo"></div>
+      <div class="subtabs">
+        <div class="seg" role="group" aria-label="Ansicht" data-en-aria-label="View">
+          <button type="button" data-wsub="table" aria-pressed="true" data-en="As table">Als Tabelle</button>
+          <button type="button" data-wsub="dist" aria-pressed="false" data-en="Distribution">Verteilung</button>
+          <button type="button" data-wsub="prof" aria-pressed="false" data-en="Profile">Profil</button>
+          <button type="button" data-wsub="store" aria-pressed="false" data-en="Storage format">Speicherformat</button>
+        </div>
+      </div>
+      <div id="lupeMsg" class="note" hidden></div>
+    </section>
+    <section id="ws-table">
+      <div class="mv" id="wView"></div>
+    </section>
+    <section id="ws-dist" hidden>
+      <div class="row-tools">
+        <div class="seg" role="group" aria-label="Stichprobe" data-en-aria-label="Sample">
+          <button type="button" id="rowsHead" aria-pressed="true" data-en="First rows">Erste Zeilen</button>
+          <button type="button" id="rowsSpread" aria-pressed="false" data-en="Spread over the table">Über die Tabelle verteilt</button>
+        </div>
+        <div class="seg" role="group" aria-label="Achse" data-en-aria-label="Axis">
+          <button type="button" id="histLin" aria-pressed="true">Linear</button>
+          <button type="button" id="histLog" aria-pressed="false" data-en="Logarithmic">Logarithmisch</button>
+        </div>
+      </div>
+      <p class="readline" id="lupeRead"></p>
+      <figure class="panel" style="display:grid;gap:14px"><figcaption id="histCap"></figcaption><div class="svg-host" id="hist"></div><dl class="stats" id="wStats"></dl></figure>
+    </section>
+    <section id="ws-prof" hidden>
+      <figure class="panel" style="display:grid;gap:10px"><figcaption id="profCap"></figcaption><div class="svg-host scroll-x" id="prof"></div></figure>
+      <figure class="panel" style="display:grid;gap:10px" id="rowProfFig"><figcaption id="rowProfCap"></figcaption><div class="svg-host scroll-x" id="rowProf"></div></figure>
+    </section>
+    <section id="ws-store" hidden>
+      <div class="row-tools"><div class="seg" role="group" aria-label="Block"><button type="button" id="blkPrev" data-en="◀ Previous block">◀ Vorheriger Block</button><button type="button" id="blkNext" data-en="Next block ▶">Nächster Block ▶</button></div><span class="count" id="blkPos"></span></div>
+      <figure class="panel" style="display:grid;gap:16px"><figcaption id="blockCap"></figcaption>
+        <div class="block-grid"><div class="hex" id="hex"></div><div style="display:grid;gap:14px"><div class="fields" id="fields"></div></div></div>
+        <div style="display:grid;gap:8px"><p class="cap" id="valsCap"></p><div class="vals" id="vals"></div></div>
+      </figure>
+    </section>
+  </div>
+
+  <!-- TENSOREN -->
+  <div class="wrap pane" role="tabpanel" id="p-tensors" aria-labelledby="t-tensors" hidden>
+    <section>
+      <div class="tab-tools"><input id="tensorFilter" type="search" placeholder="Name, Typ oder Komponente, z. B. ffn_down" data-en-placeholder="Name, type or component, e.g. ffn_down" aria-label="Tensoren filtern" data-en-aria-label="Filter tensors"><span class="count" id="tensorCount"></span><button type="button" class="ib" data-info="tensors" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div>
+      <div class="filterbar" id="tensorFilters"></div>
+      <div class="tbl-wrap"><table id="tensorTable"><thead><tr>
+        <th aria-sort="ascending"><button data-sort="fileOrder">#</button></th>
+        <th aria-sort="none"><button data-sort="name" data-en="Name">Name</button></th>
+        <th aria-sort="none"><button data-sort="comp" data-en="Component">Komponente</button></th>
+        <th data-en="Shape">Form</th>
+        <th aria-sort="none"><button data-sort="typeName" data-en="Type">Typ</button></th>
+        <th class="r" aria-sort="none"><button data-sort="nElements" data-en="Parameters">Parameter</button></th>
+        <th class="r" aria-sort="none"><button data-sort="nBytes" data-en="Size">Größe</button></th>
+        <th class="r" aria-sort="none"><button data-sort="absOffset">Offset</button></th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+  </div>
+
+  <!-- METADATEN -->
+  <div class="wrap pane" role="tabpanel" id="p-meta" aria-labelledby="t-meta" hidden>
+    <section>
+      <div class="tab-tools"><input id="metaFilter" type="search" placeholder="Schlüssel oder Wert, z. B. rope" data-en-placeholder="Key or value, e.g. rope" aria-label="Metadaten filtern" data-en-aria-label="Filter metadata"><span class="count" id="metaCount"></span><button type="button" class="ib" data-info="meta" aria-label="Erklärung" data-en-aria-label="Explanation">i</button></div>
+      <div class="tbl-wrap"><table id="metaTable"><thead class="sortable" id="metaHead"><tr><th aria-sort="none"><button type="button" data-sort="key" data-en="Key">Schlüssel</button></th><th aria-sort="none"><button type="button" data-sort="type" data-en="Type">Typ</button></th><th><span data-en="Value">Wert</span> <button type="button" class="linkbtn" data-sort="file" style="margin-left:8px" data-en="file order">Reihenfolge der Datei</button></th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="foot-line"><span data-en="Runs locally in your browser · nothing is uploaded">Läuft lokal im Browser · nichts wird hochgeladen</span><button type="button" class="ib" data-info="footer" aria-label="Erklärung" data-en-aria-label="Explanation">i</button><a href="https://github.com/themoxl/gguf-lupe" target="_blank" rel="noopener">GitHub</a></p>
+  </div>
+</footer>
+
+<div class="tour" id="tour" hidden role="dialog" aria-modal="true" aria-label="Rundgang" data-en-aria-label="Tour">
+  <div class="tour-top"><span class="tour-brand" data-en="GGUF-Lupe · Tour">GGUF-Lupe · Rundgang</span><div class="tour-dots" id="tourDots"></div><button type="button" class="btn" id="tourClose" data-en="Close (Esc)">Schließen (Esc)</button></div>
+  <div class="tour-stage" id="tourStage"></div>
+  <div class="tour-nav"><button type="button" class="btn" id="tourPrev" data-en="← Back">← Zurück</button><span class="tour-count" id="tourCount"></span><button type="button" class="btn primary" id="tourNext">Weiter →</button></div>
+</div>
+<div id="tip" class="tip" hidden></div>
+<div id="infoPop" class="info-pop" role="dialog" hidden></div>
+<div id="dropzone" class="dropzone" hidden><div data-en="<b>Drop to open</b><span>Only the header is read; the weights stay on disk.</span>"><b>Loslassen zum Öffnen</b><span>Nur der Header wird gelesen, die Gewichte bleiben auf der Platte.</span></div></div>
+
+<script>
+/*PRE*/
+</script>
+<script id="core-src">
+/*CORE*/
+</script>
+<script id="map-src">
+/*MAP*/
+</script>
+<script type="application/json" id="demo-data">/*DEMO*/</script>
+<script type="application/octet-stream" id="ll-data">/*LL*/</script>
+<script>
+/*APP*/
+</script>

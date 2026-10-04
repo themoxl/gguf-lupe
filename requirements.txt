@@ -1,0 +1,5 @@
+# Lupe server (optional): the page itself needs nothing.
+numpy
+gguf>=0.19
+# optional, for GPU (CUDA / Apple MPS) or faster CPU math: see https://pytorch.org
+# torch

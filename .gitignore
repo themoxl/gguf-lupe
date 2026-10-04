@@ -1,0 +1,20 @@
+# your local Python path for the start scripts (see start-lupe-server.cmd)
+lupe-python.txt
+
+# local llama.cpp builds and Python caches
+llama.cpp/
+__pycache__/
+*.pyc
+
+# build output and tools
+src/out/
+out/
+node_modules/
+*.log
+.check_*
+
+# old one-off scripts, kept locally
+src/old/
+
+# temporary input file of src/test-tok.cjs
+src/case.txt
