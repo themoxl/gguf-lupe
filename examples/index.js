@@ -25,5 +25,18 @@ lupeBeispielListe([
   "n_prompt": 23,
   "mb": 9.9,
   "file": "examples/what-color-is-the-sky-on-a-clear-day.js"
+ },
+ {
+  "id": "was-ist-die-hauptstadt-von-frankreich-2",
+  "title": "Was ist die Hauptstadt von Frankreich?",
+  "question": "Was ist die Hauptstadt von Frankreich?",
+  "lang": "de",
+  "model": "GLM-4.7-Flash-Q4_K_M.gguf",
+  "recorded": "2026-10-15",
+  "device": "NVIDIA GeForce RTX 5090 (CUDA0)",
+  "tokens": 23,
+  "n_prompt": 13,
+  "mb": 4.5,
+  "file": "examples/was-ist-die-hauptstadt-von-frankreich-2.js"
  }
 ]);
