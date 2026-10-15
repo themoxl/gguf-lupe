@@ -8,8 +8,9 @@ Every example has a language, 'de' or 'en' (lang): given by the page, else guess
 
 What goes in: tokens, probabilities and the real compute steps of every block; the way through all layers
 (and the logit lens) for the token that starts the answer, the first answer tokens and the two longest words
-of the question; attention weights and memory gates for every token; every step of three blocks for the
-main token, each with a few worked-out numbers.
+of the question; attention weights and memory gates for every token; for mixture-of-experts models the router's
+scores and chosen experts for every token and block; every step of three blocks for the main token, each with a
+few worked-out numbers.
 """
 import base64, gzip, json, os, re, struct, time
 
@@ -73,6 +74,12 @@ def job_export(job, rid, title=None, lang=None, n_answer=8):
     P(0.3, 'Rechenschritte der Blöcke')
     for b in range(n_layer):
         hdr['blocks'][str(b)] = R.call('run_block', rid, b)
+    if info.get('moe_blocks'):                          # mixture of experts: the router's choice and scores for every token and block
+        hdr['moe'] = R.call('run_moe', rid)
+        hdr['moeScores'] = {}
+        for b in info['moe_blocks']:
+            meta, v = unpack(R.call('run_moe_scores', rid, b, 'probs'))
+            add(f'moe:{b}', v); hdr['moeScores'][str(b)] = meta
 
     def vec(node, p):
         key = f'{node}:{p}'

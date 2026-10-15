@@ -17,6 +17,7 @@ usage: python lupe_server.py [--port 8765] [--models DIR ...] [--device auto|cud
 import argparse, hashlib, json, os, platform, re, struct, sys, threading, time, traceback, uuid, webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+import urllib.request
 import numpy as np
 try:
     import torch
@@ -583,6 +584,10 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, R.call('run_vec', rid, int(q['n']), int(q['p'])), 'application/octet-stream')
             if p == '/api/run/block':
                 return self.send(200, R.call('run_block', rid, int(q['b'])))
+            if p == '/api/run/moe':                     # mixture of experts: chosen experts and weights of every token
+                return self.send(200, R.call('run_moe', rid))
+            if p == '/api/run/moescores':
+                return self.send(200, R.call('run_moe_scores', rid, int(q['b']), 'score' if q.get('kind') == 'score' else 'probs'), 'application/octet-stream')
             if p == '/api/run/lens':
                 return self.send(200, R.run_lens(rid, int(q['p'])))
             if p == '/api/run/explain':
@@ -613,6 +618,19 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.write(chunk); left -= len(chunk)
 
 
+class Server(ThreadingHTTPServer):
+    # on Windows SO_REUSEADDR lets a second server bind the same port; requests then land on either one at random
+    allow_reuse_address = sys.platform != 'win32'
+
+
+def lupe_running(url):
+    try:                                      # no proxy: a company proxy must not answer for 127.0.0.1
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url + 'api/info', timeout=2) as r:
+            return json.load(r).get('server') == 'GGUF-Lupe'
+    except Exception:
+        return False
+
+
 def main():
     global ARGS, PAGE, MODEL_DIRS
     ap = argparse.ArgumentParser(description='GGUF-Lupe Server')
@@ -637,13 +655,21 @@ def main():
                      'gguf-lupe.html not found (it belongs in the folder above src/, or use --page).'))
     MODEL_DIRS = [os.path.realpath(d) for d in (ARGS.models + default_model_dirs()) if os.path.isdir(d)]
     url = f'http://127.0.0.1:{ARGS.port}/'
+    if lupe_running(url):                     # started twice: just open the page of the running server
+        print(say(f'GGUF-Lupe läuft schon: {url}', f'GGUF-Lupe is already running: {url}'))
+        if not ARGS.no_browser:
+            webbrowser.open(url)
+        return
     devs, dflt, n_models = ', '.join(d['kind'] + ' ' + str(d['name']) for d in devices()), pick_device(ARGS.device), len(list_models())
     print(f'GGUF-Lupe Server  {url}')
     print(say(f'  Rechnen: {devs}  (Standard: {dflt})', f'  Compute: {devs}  (default: {dflt})'))
     print(say(f'  Modell-Ordner: {"; ".join(MODEL_DIRS) or "keine gefunden (--models DIR)"}', f'  Model folders: {"; ".join(MODEL_DIRS) or "none found (--models DIR)"}'))
     print(say(f'  Gespeicherte Karten: {CACHE}', f'  Saved maps: {CACHE}'))
     print(say(f'  {n_models} GGUF-Dateien gefunden. Beenden mit Strg+C.', f'  {n_models} GGUF files found. Stop with Ctrl+C.'))
-    srv = ThreadingHTTPServer(('127.0.0.1', ARGS.port), H)
+    try:
+        srv = Server(('127.0.0.1', ARGS.port), H)
+    except OSError:
+        sys.exit(say(f'Port {ARGS.port} ist belegt. Anderen wählen, z.B.: --port 8766', f'Port {ARGS.port} is in use. Pick another one, e.g.: --port 8766'))
     if not ARGS.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:

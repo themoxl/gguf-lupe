@@ -230,7 +230,7 @@ def comp_of(run, x):
     ws = [run.leaves[-1 - s]['name'] for s in x['src'] if s < 0]
     w = ' '.join(ws)
     if b.startswith('ffn') or 'ffn_' in w:
-        return 'moe' if '_exps' in w else 'ffn'
+        return 'moe' if b.startswith('ffn_moe') or any(m in w for m in ('_exps', '_shexp', 'gate_inp', 'exp_probs')) else 'ffn'
     if op in ('RMS_NORM', 'NORM', 'L2_NORM') or b in ('attn_norm', 'attn_post_norm', 'ffn_norm', 'norm', 'result_norm') or '_norm.weight' in w:
         return 'norm'
     if b in ('attn_residual', 'l_out', 'ffn_inp', 'post_ffn'):
@@ -261,7 +261,8 @@ def run_info(rid):
             'timing': {'load_s': round(e.load_s, 1), 'gen_s': round(r.gen_s, 2), 'rec_s': round(r.rec_s, 2), 'total_s': round(getattr(r, 'total_s', 0), 1)},
             'p_next': r.p_next, 'rank_next': r.rank_next, 'top': r.top, 'layer_kinds': kinds, 'layer_nodes': r.layer_nodes,
             'n_graph': len(r.graph), 'n_stored': len(r.store), 'mb_stored': round(sum(a.nbytes for a in r.store.values()) / 1e6),
-            'attn_nodes': {str(x['block']): i for i, x in enumerate(r.graph) if x['base'] == 'kq_soft_max' and i in r.store}}
+            'attn_nodes': {str(x['block']): i for i, x in enumerate(r.graph) if x['base'] == 'kq_soft_max' and i in r.store},
+            'moe_blocks': sorted(moe_info(r).get('blocks', {}))}
 
 
 def pack(meta, arr):
@@ -311,6 +312,100 @@ def run_block(rid, b):
         steps.append({'i': i, 'name': x['name'], 'base': x['base'], 'op': x['op'], 'ne': x['ne'][:3], 'stored': i in r.store,
                       'comp': comp_of(r, x), 'ins': ins, 'tok': tok_axis(x, r.n) is not None, 'tail': last_out is not None and i > last_out})
     return {'block': b, 'steps': steps}
+
+
+# ---------------------------------------------------------------- mixture of experts: which experts each token used
+def moe_info(r):
+    """Per block with a router: the k chosen experts of every token, their mixing weights, and where the scores are.
+    Read from the router nodes llama.cpp names in build_moe_ffn (ffn_moe_probs, ffn_moe_argsort, ffn_moe_weights...)."""
+    if getattr(r, 'moe', None) is not None:
+        return r.moe
+    n, raw = r.n, getattr(r, 'moe_raw', {})
+
+    def tok_rows(i):                                    # router node -> [tokens, values]
+        a, ne = raw.get(i), r.graph[i]['ne']
+        if a is None:
+            return None
+        if ne[2] == n and ne[0] == 1:                   # [1, k, tokens], e.g. ffn_moe_weights
+            return a.reshape(n, ne[1])
+        if ne[1] == n:                                  # [experts or k, tokens]
+            return a.reshape(n, ne[0])
+        return None
+    blocks, N = {}, None
+    for b in range(r.engine.n_layer):
+        # router nodes by name, also when llama.cpp names a reshape (gpt-oss: ffn_moe_weights_softmax)
+        nodes = {x['base']: i for i, x in enumerate(r.graph) if x['il'] == b and (x['op'] not in SHAPE or x['base'] in I.MOE_NODES)}
+        sel = next((nodes[nm] for nm in ('ffn_moe_argsort', 'ffn_moe_topk') if nm in nodes and r.graph[nodes[nm]]['op'] in ('ARGSORT', 'TOP_K', 'VIEW')), None)
+        if sel is None:
+            continue
+        order = tok_rows(sel)
+        ks = [x['ne'][1] for x in r.graph if x['il'] == b and x['op'] == 'MUL_MAT_ID']
+        if order is None or not ks:
+            continue
+        k, N = int(ks[0]), int(r.graph[sel]['ne'][0])
+        desc = r.graph[sel]['op'] != 'ARGSORT' or r.graph[sel]['op_params'][0] == 1    # GGML_SORT_ORDER_DESC
+        ids = order[:, :k] if desc else order[:, ::-1][:, :k]
+        src = resolve(r, r.graph[sel]['src'][0])                                        # what the experts were ranked by
+        score = src[1] if src[0] == 'n' and src[1] in raw else nodes.get('ffn_moe_probs')
+        w = None
+        mix = nodes.get('ffn_moe_weighted')
+        if mix is not None:                                                              # experts' results × these weights
+            for s in r.graph[mix]['src']:
+                k2 = resolve(r, s)
+                if k2[0] == 'n' and k2[1] in raw:
+                    w = tok_rows(k2[1])
+        if w is None:                                                                    # e.g. gpt-oss (softmax over the chosen only), weights applied before the experts
+            for nm in ('ffn_moe_weights_softmax', 'ffn_moe_weights_scaled', 'ffn_moe_weights_norm', 'ffn_moe_weights'):
+                if nodes.get(nm) in raw:
+                    w = tok_rows(nodes[nm]); break
+        probs = nodes.get('ffn_moe_probs')
+        blocks[b] = {'ids': ids.astype(int), 'w': w, 'score': score, 'probs': probs,
+                     'gating': {'SOFT_MAX': 'softmax', 'SIGMOID': 'sigmoid'}.get(r.graph[probs]['op']) if probs is not None else None,
+                     'bias': 'ffn_moe_probs_biased' in nodes,
+                     'shared': any(r.leaves[-1 - s]['name'].endswith('_shexp.weight') for x in r.graph if x['il'] == b for s in x['src'] if s < 0)}
+    r.moe = {'n_expert': N, 'blocks': blocks} if blocks else {}
+    return r.moe
+
+
+def run_moe(rid):
+    """The router's choices for the page: per block and token the k experts (best first) and their weights."""
+    r = get_run(rid)
+    index_names(r)
+    m = moe_info(r)
+    if not m:
+        return {}
+    bs = m['blocks']
+    first = bs[min(bs)]
+    out = {'n_expert': m['n_expert'], 'k': int(first['ids'].shape[1]), 'gating': first['gating'], 'bias': first['bias'], 'shared': first['shared'],
+           'blocks': {}}
+    for b, x in bs.items():
+        w = x['w']
+        out['blocks'][str(b)] = {'ids': x['ids'].tolist(), 'w': np.round(w, 5).tolist() if w is not None and w.shape[1] == x['ids'].shape[1] else None,
+                                 'score': r.graph[x['score']]['name'] if x['score'] is not None else None}
+    return out
+
+
+def run_moe_scores(rid, b, kind='probs'):
+    """Router numbers for every expert and token of one block, [tokens, experts]:
+    'probs' = how well each expert fits the token (softmax or sigmoid), 'score' = what the experts were ranked by
+    (the same, or plus a fixed balancing bias per expert)."""
+    r = get_run(rid)
+    index_names(r)
+    x = moe_info(r).get('blocks', {}).get(int(b))
+    i = x and (x['probs'] if kind == 'probs' else x['score'])
+    if i is None:
+        raise ValueError('Kein Experten-Router in diesem Block.')
+    a = r.moe_raw.get(i)
+    if a is None:
+        a = r.detail([i])[i]
+    ne = r.graph[i]['ne']
+    a = a.astype(np.float32).reshape(r.n, ne[0])
+    if kind == 'probs' and r.graph[i]['op'] not in ('SOFT_MAX', 'SIGMOID'):
+        a = np.exp(a - a.max(1, keepdims=True)); a /= a.sum(1, keepdims=True)    # raw router logits (e.g. gpt-oss): show them as a softmax over all experts
+    off = float(a.mean())                               # sent as a - off: the scores can sit near 10 with tiny gaps, too fine for f16
+    meta = {'block': int(b), 'kind': kind, 'name': r.graph[i]['name'], 'op': r.graph[i]['op'], 'n': r.n, 'experts': int(ne[0]),
+            'offset': off, 'min': float(a.min()), 'max': float(a.max())}
+    return pack(meta, a - off)
 
 
 # ---------------------------------------------------------------- inputs for the logit lens (computed in the server)
@@ -409,12 +504,17 @@ def run_explain(rid, i, pos, j):
         if op == 'MUL_MAT' and len(srcs) == 2 and srcs[0][0] == 'n' and srcs[1][0] == 'n':
             return attn_matmul(r, out, x, srcs, pos, j, shape)
         if op in ('MUL', 'ADD', 'SUB', 'DIV') and len(srcs) == 2:
+            def bcast(in_shape):                 # ggml broadcasting: the input entry that meets output entry j (ne0 runs fastest)
+                k, stride, rem = 0, 1, j
+                for d, n_in in zip(shape, list(in_shape) + [1] * len(shape)):
+                    k += (rem % d % max(1, int(n_in))) * stride; stride *= max(1, int(n_in)); rem //= d
+                return k
             vals = []
             for s in direct:
                 if s[0] == 'w':
-                    wv = weight_vec(r.path, s[1]); vals.append(float(wv[j % wv.size]) if wv is not None else None)
+                    wv = weight_vec(r.path, s[1]); vals.append(float(wv[bcast(s[2]['ne']) % wv.size]) if wv is not None else None)
                 else:
-                    av = act(s); vals.append(float(av[j % av.size]))
+                    av, ash = vec(r, s[1], pos); vals.append(float(av[bcast(ash) % av.size]))
             if None not in vals:
                 sym = {'MUL': '×', 'ADD': '+', 'SUB': '−', 'DIV': '÷'}[op]
                 calc = {'MUL': vals[0] * vals[1], 'ADD': vals[0] + vals[1], 'SUB': vals[0] - vals[1], 'DIV': vals[0] / vals[1] if vals[1] else float('nan')}[op]

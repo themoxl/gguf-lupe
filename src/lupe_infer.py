@@ -76,7 +76,10 @@ class llama_chat_message(C.Structure):
     _fields_ = [('role', C.c_char_p), ('content', C.c_char_p)]
 
 
-GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_BF16 = 0, 1, 30
+GGML_TYPE_F32, GGML_TYPE_F16, GGML_TYPE_BF16, GGML_TYPE_I32 = 0, 1, 30, 26
+# the router of a mixture-of-experts block (build_moe_ffn in llama.cpp): scores, ranking of the experts, mixing weights
+MOE_NODES = {'ffn_moe_logits', 'ffn_moe_probs', 'ffn_moe_probs_biased', 'ffn_moe_argsort', 'ffn_moe_topk',
+             'ffn_moe_weights', 'ffn_moe_weights_norm', 'ffn_moe_weights_scaled', 'ffn_moe_weights_softmax'}
 DEV_CPU, DEV_GPU, DEV_IGPU = 0, 1, 2
 SHAPE_OPS = {'NONE', 'VIEW', 'RESHAPE', 'PERMUTE', 'TRANSPOSE', 'CPY', 'CONT', 'DUP', 'SET_ROWS'}
 
@@ -304,6 +307,11 @@ class Engine:
             return s, 'gemma4'
         if '<start_of_turn>' in tmpl:
             return f'<start_of_turn>user\n{question}<end_of_turn>\n<start_of_turn>model\n', 'gemma'
+        if '[gMASK]<sop>' in tmpl and '<|assistant|>' in tmpl:  # GLM 4.x: llama.cpp's built-in guess adds newlines and no '</think>', the model then rambles
+            s = f'[gMASK]<sop><|user|>{question}<|assistant|>'
+            if '</think>' in tmpl:
+                s += '</think>'
+            return s, 'glm'
         if tmpl:
             msg = (llama_chat_message * 1)(llama_chat_message(b'user', question.encode('utf-8')))
             buf = C.create_string_buffer(8192)
@@ -354,7 +362,7 @@ class Engine:
 
     @staticmethod
     def _to_array(raw, t):
-        dt = {GGML_TYPE_F32: np.float32, GGML_TYPE_F16: np.float16}.get(t.type)
+        dt = {GGML_TYPE_F32: np.float32, GGML_TYPE_F16: np.float16, GGML_TYPE_I32: np.int32}.get(t.type)
         ne, nb = [int(x) for x in t.ne], [int(x) for x in t.nb]
         if dt is None:
             if t.type == GGML_TYPE_BF16:
@@ -448,15 +456,21 @@ class Run:
             nm = t.name.decode('utf-8', 'replace')
             if not nm or ' (' in nm or nm.rpartition('-')[0] == 'norm':
                 return False                                  # views, and the unweighted norm (recomputed on request)
+            if nm.rpartition('-')[0] in MOE_NODES:
+                return True                                   # router of a mixture-of-experts block (small: experts × tokens)
             ne = list(t.ne)
             if ne[0] == d and ne[1] == n and ne[2] == 1 and ne[3] == 1 and t.type == GGML_TYPE_F32:
                 return True                                   # a vector of model width for every token
             return nm.startswith('kq_soft_max')               # attention weights
+        self._overview = overview
         r = e.record(toks, overview, graph=True)
         self.graph, self.leaves, self.rec_s = r['graph'], r['leaves'], r['seconds']
-        self.store = {}
+        self.store, self.moe_raw = {}, {}
         for i, a in r['got'].items():
             if a is None:
+                continue
+            if r['graph'][i]['name'].rpartition('-')[0] in MOE_NODES:
+                self.moe_raw[i] = a                           # small; kept apart from the model-width store (see moe_info in lupe_worker.py)
                 continue
             a = a.reshape(-1, a.shape[-2], a.shape[-1]) if a.ndim >= 2 else a
             if r['graph'][i]['name'].startswith('kq_soft_max'):
@@ -509,9 +523,12 @@ class Run:
         need = [i for i in idx if i not in self.store and i not in self._detail]
         if need:
             s = set(need)
-            r = self.engine.record(self.toks, lambda i, t: i in s)
+            # stop at the same nodes as the first pass, so the GPU computes in the same pieces and gets bit-identical numbers;
+            # otherwise tiny rounding differences can flip a close expert choice (MoE) and the later blocks drift apart
+            ov = self._overview
+            r = self.engine.record(self.toks, lambda i, t: i in s or ov(i, t))
             for i, a in r['got'].items():
-                if a is not None:
+                if a is not None and i in s:
                     self._detail[i] = a.reshape(-1, a.shape[-2], a.shape[-1]) if a.ndim >= 2 else a
             while sum(a.nbytes for a in self._detail.values()) > 1.5e9 and len(self._detail) > len(need):
                 self._detail.pop(next(iter(self._detail)))

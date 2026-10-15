@@ -667,6 +667,22 @@ svg .ax { font-size: 10.5px; fill: var(--muted); font-family: var(--font-ui); }
 .lm { display: grid; gap: 3px; margin-bottom: 8px; }
 .lm-bars { display: flex; align-items: flex-end; gap: 2px; height: 48px; border-bottom: 1px solid var(--line-2); }
 .lm-bars i { flex: 1; min-width: 2px; border-radius: 2px 2px 0 0; }
+/* mixture of experts: router bars, the chosen experts, map of choices */
+.run-moe { margin-top: 16px; }
+.run-moe h3 { font-size: 15px; margin: 0 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.mx-bars, .mx-labs { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 1px; }
+.mx-bars { align-items: end; height: 96px; border-bottom: 1px solid var(--line-2); }
+.mx-bars i { display: block; background: var(--line-2); border-radius: 2px 2px 0 0; min-height: 2px; }
+.mx-bars i.on { background: var(--c-moe); }
+.mx-labs { min-height: 16px; font-size: 11px; color: var(--c-moe); text-align: center; }
+.mx-labs b { white-space: nowrap; overflow: visible; }
+.mx-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 2px; }
+.mx-pill { border: 1.5px solid var(--c-moe); border-radius: 999px; padding: 1px 9px; font-size: 13px; }
+.mx-pill.sh { border-style: dashed; color: var(--ink-2); }
+.mx-map-h { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 16px 0 6px; font-size: 14px; }
+.mx-map canvas { display: block; cursor: pointer; }
+.bstrip button.moe { box-shadow: inset 0 -5px 0 var(--c-moe); }
+.bstrip button.moe[aria-current="true"] { box-shadow: inset 0 -5px 0 var(--c-moe), 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
 @media (max-width: 900px) { .run-grid, .run-grid2 { grid-template-columns: minmax(0, 1fr); } .run-layer output { min-width: 0; } }
 </style>
 
@@ -944,6 +960,7 @@ svg .ax { font-size: 10.5px; fill: var(--muted); font-family: var(--font-ui); }
         </div>
       </div>
       <section class="run-sec"><h3 id="runBlockTitle">Block</h3><div class="run-flow" id="runFlow"></div><div class="run-detail" id="runDetail" hidden></div></section>
+      <section class="panel run-moe" id="runMoe" hidden><h3 id="runMoeTitle" data-en="Experts (MoE)">Experten (MoE)</h3><div id="runMoeBody"></div></section>
       <div class="run-grid2">
         <section class="panel"><h3 id="runAttnTitle">Aufmerksamkeit</h3><div id="runAttn"></div></section>
         <section class="panel"><h3 id="runOutTitle">Das nächste Token</h3><div id="runOut"></div></section>
@@ -2161,6 +2178,21 @@ function showVal(v) {
   if (typeof v === 'object' && v.items) { const a = Array.from(v.items); const mn = Math.min(...a), mx = Math.max(...a); return mn === mx ? fmtInt(mn) : `${fmtInt(mn)}–${fmtInt(mx)}`; }
   return typeof v === 'number' ? fmtInt(v) : String(v);
 }
+// mixture of experts: of the routed expert tables (…_exps) only k of N compute for a token
+function moeStats(M) {
+  const N = metaNum(M, 'expert_count'), k = metaNum(M, 'expert_used_count');
+  if (!N || !k || typeof N !== 'number' || typeof k !== 'number' || !M.layers.some(L => L.moe)) return null;
+  const off = new Set(M.layers.filter(L => !isMainPass(M, L) || L.kind === 'mtp').flatMap(L => L.tensors));   // MTP blocks only guess ahead, not in the normal pass
+  let routed = 0, active = 0;
+  for (const t of M.tensors) {
+    if (off.has(t)) continue;
+    if (/_exps/.test(t.name)) { routed += t.nElements; active += t.nElements * k / N; } else active += t.nElements;
+  }
+  const emb = M.byName.get('token_embd.weight');
+  if (emb && M.byName.get('output.weight')) active -= emb.nElements;      // a separate embedding table is only looked up, not computed with
+  const shared = metaNum(M, 'expert_shared_count') ?? (M.tensors.some(t => /_shexp/.test(t.name)) ? 1 : 0);
+  return { N, k, shared, routed, active, emb: emb && M.byName.get('output.weight') ? emb.nElements : 0, nMoe: M.layers.filter(L => L.moe && isMainPass(M, L) && L.kind !== 'mtp').length };
+}
 function renderFileBar() {
   const M = S.model, info = M.info;
   $('#fileName').textContent = info.fileName;
@@ -2180,8 +2212,10 @@ function updateReadStat() {
 function renderOverview() {
   const M = S.model, h = M.h;
   const share = pct(h.fileSize - h.headerEnd, h.fileSize), params = fmtParams(M.params), nT = fmtInt(h.nTensors), hb = fmtBytes(h.headerEnd, 2);
+  const ms = moeStats(M), act = ms ? fmtParams(ms.active) : '', actP = ms ? pct(ms.active, M.params) : '';
   $('#ovExplain').innerHTML = tl(`Diese Datei <b>ist</b> das Modell: zu ${share} Zahlen, <b>${params} gelernte Gewichte</b> in ${nT} Tabellen (Tensoren). Ganz vorne steht ein kleiner Header (${hb}) mit Bauplan, Wörterbuch und Inhaltsverzeichnis. Beim Öffnen wird nur er gelesen.`,
-    `This file <b>is</b> the model: ${share} of it is numbers, <b>${params} learned weights</b> in ${nT} tables (tensors). At the very front sits a small header (${hb}) with the blueprint, vocabulary and table of contents. Opening the file reads only this header.`);
+    `This file <b>is</b> the model: ${share} of it is numbers, <b>${params} learned weights</b> in ${nT} tables (tensors). At the very front sits a small header (${hb}) with the blueprint, vocabulary and table of contents. Opening the file reads only this header.`)
+    + (ms ? ' ' + tl(`Ein <b>Mixture-of-Experts</b>-Modell: Pro Token rechnen davon nur etwa <b>${act}</b> (${actP}).`, `A <b>mixture-of-experts</b> model: per token only about <b>${act}</b> of them compute (${actP}).`) : '');
   const ft = M.meta['general.file_type'];
   const blocks = metaNum(M, 'block_count'), nextn = metaNum(M, 'nextn_predict_layers');
   const heads = metaNum(M, 'attention.head_count'), kv = metaNum(M, 'attention.head_count_kv');
@@ -2195,7 +2229,8 @@ function renderOverview() {
     [tl('Kontextlänge', 'Context length'), showVal(metaNum(M, 'context_length')) ?? '–', tl('Tokens', 'tokens')],
     [tl('Dimensionen', 'Dimensions'), showVal(metaNum(M, 'embedding_length')) ?? '–', tl('Zahlen pro Token-Vektor', 'numbers per token vector')],
     [tl('Attention-Köpfe', 'Attention heads'), heads != null ? showVal(heads) : '–', kv != null ? tl(`${kvN} Key/Value-Köpfe`, `${kvN} key/value heads`) : ''],
-    ...(experts ? [[tl('Experten (MoE)', 'Experts (MoE)'), fmtInt(experts), used ? tl(`${usedN} aktiv pro Token`, `${usedN} active per token`) : '']] : []),
+    ...(experts ? [[tl('Experten (MoE)', 'Experts (MoE)') + ' ' + ib('moe'), fmtInt(experts), used ? tl(`${usedN} aktiv pro Token${ms && ms.shared ? ` + ${fmtInt(ms.shared)} ${ms.shared === 1 ? 'gemeinsamer' : 'gemeinsame'}` : ''}`, `${usedN} active per token${ms && ms.shared ? ` + ${fmtInt(ms.shared)} shared` : ''}`) : '']] : []),
+    ...(ms ? [[tl('Aktiv pro Token', 'Active per token') + ' ' + ib('moeActive'), '≈ ' + act, tl(`${actP} der Gewichte rechnen`, `${actP} of the weights compute`)]] : []),
     [tl('Wörterbuch', 'Vocabulary'), M.vocabSize ? fmtInt(M.vocabSize) : '–', tl('Tokens', 'tokens')],
     [tl('Tensoren', 'Tensors'), fmtInt(h.nTensors), tl(`${nKV} Metadaten-Einträge`, `${nKV} metadata entries`)],
     [tl('Dateigröße', 'File size'), fmtBytes(h.fileSize), tl(`${fsz} Byte · GGUF v${h.version}`, `${fsz} bytes · GGUF v${h.version}`)],
@@ -2255,9 +2290,9 @@ function typeColors(M) {
 function renderBars() {
   const M = S.model;
   barRows($('#compBars'), Object.entries(M.byComp).sort((a, b) => b[1].bytes - a[1].bytes).map(([c, v]) => {
-    const p = fmtParams(v.params), b = fmtBytes(v.bytes), sh = pct(v.bytes, M.bytes), n = fmtInt(v.n);
+    const p = fmtParams(v.params), b = fmtBytes(v.bytes), sh = pct(v.bytes, M.bytes), n = fmtInt(v.n), ms = c === 'moe' && moeStats(M);
     return {
-      label: COMPS[c].label, sub: tl(`${p} Parameter`, `${p} parameters`), bytes: v.bytes, color: `var(${COMPS[c].v})`,
+      label: COMPS[c].label, sub: tl(`${p} Parameter`, `${p} parameters`) + (ms ? tl(` · je Token rechnen ${fmtInt(ms.k)} von ${fmtInt(ms.N)}`, ` · ${fmtInt(ms.k)} of ${fmtInt(ms.N)} compute per token`) : ''), bytes: v.bytes, color: `var(${COMPS[c].v})`,
       tip: `<b>${COMPS[c].label}</b><br>${tl(`${b} · ${sh} der Gewichte<br><span class="m">${n} Tensoren · ${p} Parameter · Klick listet sie auf</span>`, `${b} · ${sh} of weights<br><span class="m">${n} tensors · ${p} parameters · click to list them</span>`)}`,
       onClick: () => showTensorsWhere({ comp: c }),
     };
@@ -2288,7 +2323,9 @@ function renderLayers() {
   const nL = fmtInt(Ls.length), kList = ['lin', 'swa', 'attn', 'mtp', 'other'].filter(k => kinds[k]).map(k => `${fmtInt(kinds[k])} × ${KL[k]}`).join(' · '), every = fmtInt(fai || 0);
   $('#layerLede').textContent = tl(`${nL} Blöcke: ${kList}.`, `${nL} blocks: ${kList}.`)
     + (fai && kinds.lin ? tl(` Jeder ${every}. Block nutzt volle Attention, die übrigen eine lineare Variante mit fester Zustandsgröße statt wachsendem KV-Cache.`, ` One block in ${every} uses full attention; the others use a linear variant with a fixed-size state instead of a growing KV cache.`) : '')
-    + (Ls.some(L => L.moe) ? tl(' Die Blöcke enthalten Mixture-of-Experts-FFNs.', ' The blocks contain mixture-of-experts FFNs.') : '');
+    + (() => { const s = moeStats(M); if (!s) return Ls.some(L => L.moe) ? tl(' Die Blöcke enthalten Mixture-of-Experts-FFNs.', ' The blocks contain mixture-of-experts FFNs.') : '';
+      const nm = fmtInt(s.nMoe), N = fmtInt(s.N), k = fmtInt(s.k), sh = s.shared ? tl(` plus ${fmtInt(s.shared)} ${s.shared === 1 ? 'gemeinsamer' : 'gemeinsame'}`, ` plus ${fmtInt(s.shared)} shared`) : '';
+      return tl(` ${nm} Blöcke haben statt eines FFN ${N} Experten (MoE); pro Token rechnen davon ${k}${sh}.`, ` ${nm} blocks have ${N} experts (MoE) instead of one FFN; ${k}${sh} of them compute per token.`); })();
   const mode = S.layerMode, tc = typeColors(M);
   const colorOf = k => mode === 'comp' ? `var(${COMPS[k].v})` : tc[k];
   const keys = mode === 'comp' ? STACK_ORDER.filter(c => Ls.some(L => L.tensors.some(t => t.comp === c))) : RAMP.filter(tn => Ls.some(L => L.tensors.some(t => t.typeName === tn)));
@@ -3360,6 +3397,27 @@ function buildRecipe(M, L) {
   } else {
     const R0 = r, gemma = M.arch.startsWith('gemma');
     let q, k, v;
+    if (T.attn_kv_a_mqa) {
+      // multi-head latent attention (deepseek2 family): keys and values pass through a small compressed vector, which is all the KV cache keeps
+      const kvr = showVal(metaNum(M, 'attention.kv_lora_rank')), qr = showVal(metaNum(M, 'attention.q_lora_rank')), rd = showVal(metaNum(M, 'rope.dimension_count'));
+      const qa = T.attn_q_a ? w('qa', 'attn_q_a', 0.5, R0, tl(`Query zusammenpressen${qr ? ` auf ${qr}` : ''}`, `compress the query${qr ? ` to ${qr}` : ''}`)) : null;
+      const qan = qa ? w('qan', 'attn_q_a_norm', 0.5, R0 + 1, tl('normieren', 'normalize')) : null;
+      const qb = w('qb', T.attn_q_b ? 'attn_q_b' : 'attn_q', 0.5, R0 + 2, tl(`Query je Kopf · ${heads} Köpfe`, `query per head · ${heads} heads`));
+      const kva = w('kva', 'attn_kv_a_mqa', 2.5, R0, tl(`Key/Value zusammenpressen${kvr ? ` auf ${kvr}` : ''}${rd ? ` (+ ${rd} für die Position)` : ''}`, `compress key/value${kvr ? ` to ${kvr}` : ''}${rd ? ` (+ ${rd} for position)` : ''}`));
+      const kvn = w('kvn', 'attn_kv_a_norm', 2.5, R0 + 1, T.attn_kv_b ? tl('normieren', 'normalize') : tl(`normieren · nur dies${rd ? ` (+ ${rd} Positionszahlen)` : ''} kommt in den KV-Cache`, `normalize · only this${rd ? ` (+ ${rd} position numbers)` : ''} goes into the KV cache`));
+      if (qa) { e(n1, qa); e(qa, qan); e(qan, qb); } else e(n1, qb);
+      e(n1, kva); e(kva, kvn);
+      const kb = w('kb', 'attn_k_b', 0.5, R0 + 3, tl('Query in den Raum des Komprimats umrechnen', 'convert the query into the compressed space')); e(qb, kb);
+      const rp = node('rope', 2, R0 + 3, 'op', 'RoPE', tl(`Position einrechnen, nur auf ${rd || 'wenige'} Zahlen`, `add position, only on ${rd || 'a few'} numbers`), { span: 2 }); e(qb, rp); e(kva, rp);
+      const full = !!T.attn_kv_b;                       // older files: K and V are unfolded from the compressed vector and cached in full
+      const kvb = full ? w('kvb', 'attn_kv_b', 2.5, R0 + 2, tl('Keys und Values aus dem Komprimat auffächern', 'unfold keys and values from the compressed vector')) : null;
+      e(kvn, kvb);
+      const at = node('attn', 1.5, R0 + 4, 'op', 'Attention', tl(`Query mit den Keys ${L.kind === 'swa' ? 'der letzten Tokens' : 'aller vorherigen Tokens'} vergleichen, Values mischen · ${heads} Köpfe · ${full ? 'KV-Cache' : 'KV-Cache: nur das Komprimat'}`, `compare the query with the keys of ${L.kind === 'swa' ? 'recent tokens' : 'all previous tokens'}, mix values · ${heads} heads · ${full ? 'KV cache' : 'KV cache: only the compressed vector'}`), { span: 3 });
+      e(kb || qb, at); e(rp, at); e(kvb || kvn, at);
+      const vb = w('vb', 'attn_v_b', 1.5, R0 + 5, tl('Values aus dem Komprimat zurückholen', 'recover the values from the compressed vector')); e(at, vb);
+      mixOut = w('o', 'attn_output', 1.5, R0 + 6, back); e(vb || at, mixOut);
+      r = R0 + 7;
+    } else {
     if (T.attn_qkv) { q = k = v = w('qkv', 'attn_qkv', 1.5, R0, tl('Query, Key und Value in einem', 'Query, key and value in one')); e(n1, q); }
     else {
       q = w('q', 'attn_q', 0.5, R0, qwen ? tl('Query + Gate: wonach sucht das Token?', 'Query + gate: what does it look for?') : tl('Query: wonach sucht das Token?', 'Query: what does it look for?'));
@@ -3381,6 +3439,7 @@ function buildRecipe(M, L) {
     if (T.post_attention_norm && T.ffn_norm) { const pn = w('pan', 'post_attention_norm', 1.5, rr++, nrmRes); e(mixOut, pn); mixOut = pn; }
     r = rr;
     void gemma;
+    }
   }
   const j1 = node('j1', 1.5, r++, 'join', '+', tl('Eingang wieder aufaddieren', 'add the input back')); e(mixOut, j1); e(joinFrom, j1, { skip: true });
   let pre = j1;
@@ -3388,13 +3447,24 @@ function buildRecipe(M, L) {
   else if (T.post_attention_norm) { pre = w('pan2', 'post_attention_norm', 1.5, r++, tl('Normieren vor dem FFN', 'normalize before the FFN')); e(j1, pre); }
   let ffOut;
   if (T.ffn_gate_inp) {
-    const ro = w('router', 'ffn_gate_inp', 0.5, r, tl('Router: Punktzahl je Experte', 'Router: score per expert')); e(pre, ro);
-    const nE = showVal(metaNum(M, 'expert_count')), kE = showVal(metaNum(M, 'expert_used_count'));
-    const ex = node('exp', 2, r, 'op', tl(`${kE || 'k'} von ${nE || 'N'} Experten`, `${kE || 'k'} of ${nE || 'N'} experts`), tl('nur die besten Experten rechnen', 'only the best experts compute')); e(ro, ex); e(pre, ex);
-    const gx = w('gx', 'ffn_gate_exps', 1, r + 1, tl('Experten: Gate', 'Experts: gate')), ux = w('ux', 'ffn_up_exps', 2, r + 1, tl('Experten: Inhalt', 'Experts: content')), dx = w('dx', 'ffn_down_exps', 3, r + 1, tl('Experten: zurück', 'Experts: back'));
-    [gx, ux, dx].forEach(x => e(ex, x));
-    ffOut = node('mix', 1.5, r + 2, 'op', tl('Gewichtet mischen', 'Weighted mix'), tl('Ergebnisse der Experten zusammenführen', 'combine the experts’ results')); [gx, ux, dx].forEach(x => e(x, ffOut));
-    r += 3;
+    // mixture of experts (build_moe_ffn in llama.cpp): router → pick the k best → only those experts compute → weighted mix (+ shared expert)
+    const nE = showVal(metaNum(M, 'expert_count')) || 'N', kE = showVal(metaNum(M, 'expert_used_count')) || 'k', ef = showVal(metaNum(M, 'expert_feed_forward_length'));
+    const gf = metaNum(M, 'expert_gating_func'), fn = gf === 1 ? 'Softmax' : gf === 2 ? 'Sigmoid' : '';
+    const ro = w('router', 'ffn_gate_inp', 0.5, r, tl(`Router: Punktzahl für jeden der ${nE} Experten${fn ? `, dann ${fn}` : ''}`, `Router: a score for each of the ${nE} experts${fn ? `, then ${fn}` : ''}`)); e(pre, ro);
+    const bi = w('bias', 'exp_probs_b.bias', 1.5, r, tl('+ fester Ausgleich je Experte, nur für die Auswahl', '+ fixed balancing per expert, for the choice only'));
+    const sx = !!(T.ffn_gate_shexp || T.ffn_up_shexp || T.ffn_down_shexp);
+    const sg = w('sg', 'ffn_gate_shexp', 2.5, r, tl('gemeinsamer Experte: Gate', 'shared expert: gate')), su = w('su', 'ffn_up_shexp', 3.5, r, tl('gemeinsamer Experte: Inhalt', 'shared expert: content'));
+    e(pre, sg); e(pre, su);
+    const pk = node('pick', 1, r + 1, 'op', tl(`Die besten ${kE} von ${nE} wählen`, `Pick the best ${kE} of ${nE}`), tl(`nur diese ${kE} rechnen · ihre Punktzahlen werden die Misch-Gewichte`, `only these ${kE} compute · their scores become the mixing weights`), { span: 2 });
+    e(ro, pk); e(bi, pk);
+    const sd = w('sd', 'ffn_down_shexp', 3, r + 1, tl('gemeinsamer Experte: zurück · rechnet bei jedem Token', 'shared expert: back · computes for every token'), { span: 2 });
+    e(sg, sd); e(su, sd);
+    const sub = x => ef ? tl(`${x} · ${nE} Stück, je ${ef} breit`, `${x} · ${nE} of them, ${ef} wide each`) : x;
+    const gx = w('gx', 'ffn_gate_exps', 0.5, r + 2, sub(tl('Experten: Gate', 'Experts: gate'))), ux = w('ux', 'ffn_up_exps', 1.5, r + 2, sub(tl('Experten: Inhalt', 'Experts: content'))), dx = w('dx', 'ffn_down_exps', 2.5, r + 2, sub(tl('Experten: zurück', 'Experts: back')));
+    [gx, ux, dx].forEach(x => e(pk, x));
+    ffOut = node('mix', 1.5, r + 3, 'op', tl('Gewichtet mischen', 'Weighted mix'), sx ? tl(`${kE} Ergebnisse × Gewicht, + gemeinsamer Experte`, `${kE} results × weight, + shared expert`) : tl(`${kE} Ergebnisse × Gewicht, addieren`, `${kE} results × weight, added up`), { span: 3 });
+    [gx, ux, dx].forEach(x => e(x, ffOut)); e(sd, ffOut);
+    r += 4;
   } else if (T.ffn_gate) {
     const ff = showVal(metaNum(M, 'feed_forward_length'));
     const g = w('fg', 'ffn_gate', 0.5, r, tl(`auffächern auf ${ff}: entscheidet, was durchkommt`, `expand to ${ff}: decides what gets through`)), u = w('fu', 'ffn_up', 2.5, r, tl(`auffächern auf ${ff}: der Inhalt`, `expand to ${ff}: the content`));
@@ -3496,17 +3566,22 @@ function drawFlow(host, R, opts = {}) {
   return R;
 }
 function blockStripHTML(M, cur) {
-  return `<div class="bstrip" role="group" aria-label="${tl('Blöcke', 'Blocks')}">${M.layers.map((L, i) => `<button type="button" data-b="${i}" aria-current="${i === cur}" style="background:${KIND_COLOR[L.kind]}${isMainPass(M, L) ? '' : ';opacity:.55'}" title="Block ${esc(L.key)} · ${esc(kindLabel(M, L.kind))} · ${fmtBytes(L.bytes)}" aria-label="Block ${esc(L.key)}"></button>`).join('')}</div>`;
+  const moeT = tl(' · mit Experten (MoE)', ' · with experts (MoE)');
+  return `<div class="bstrip" role="group" aria-label="${tl('Blöcke', 'Blocks')}">${M.layers.map((L, i) => `<button type="button" data-b="${i}" aria-current="${i === cur}"${L.moe ? ' class="moe"' : ''} style="background:${KIND_COLOR[L.kind]}${isMainPass(M, L) ? '' : ';opacity:.55'}" title="Block ${esc(L.key)} · ${esc(kindLabel(M, L.kind))}${L.moe ? moeT : ''} · ${fmtBytes(L.bytes)}" aria-label="Block ${esc(L.key)}"></button>`).join('')}</div>`;
 }
 function kindsLegend(M) {
   const ks = ['lin', 'swa', 'attn', 'mtp', 'other'].filter(k => M.layers.some(L => L.kind === k));
-  return `<div class="legend" style="margin-top:6px">${ks.map(k => `<span><i style="background:${KIND_COLOR[k]}"></i>${fmtInt(M.layers.filter(L => L.kind === k).length)} × ${esc(kindLabel(M, k))}</span>`).join('')}</div>`;
+  const main = M.layers.filter(L => isMainPass(M, L)), nMoe = main.filter(L => L.moe).length;
+  const moe = nMoe ? `<span><i style="background:var(--c-moe)"></i>${tl(`${fmtInt(nMoe)} × mit Experten (MoE)`, `${fmtInt(nMoe)} × with experts (MoE)`)}${nMoe < main.length ? tl(` · ${fmtInt(main.length - nMoe)} × ohne`, ` · ${fmtInt(main.length - nMoe)} × without`) : ''}</span>` : '';
+  return `<div class="legend" style="margin-top:6px">${ks.map(k => `<span><i style="background:${KIND_COLOR[k]}"></i>${fmtInt(M.layers.filter(L => L.kind === k).length)} × ${esc(kindLabel(M, k))}</span>`).join('')}${moe}</div>`;
 }
+// the block a view starts with: one with experts if the model has them (the typical block), else one with attention
+const typicalBlock = M => { const i = M.layers.findIndex(L => L.moe && isMainPass(M, L)); return i >= 0 ? i : M.layers.findIndex(L => L.kind === 'attn'); };
 function renderFlow() {
   const M = S.model;
   const name = M.meta['general.name'] || M.arch;
   if (!M.layers.length) { const msg = tl('Keine Blöcke (blk.N.*) in dieser Datei, also kein Datenfluss.', 'No blocks (blk.N.*) in this file, so no data flow.'); $('#flowExplain').textContent = msg; $('#flowChain').innerHTML = `<div class="st"><span>${msg}</span></div>`; $('#flowDiagram').innerHTML = ''; return; }
-  if (S.flowBlock == null || !M.layers[S.flowBlock]) { const i = M.layers.findIndex(L => L.kind === 'attn'); S.flowBlock = i >= 0 ? i : 0; }
+  if (S.flowBlock == null || !M.layers[S.flowBlock]) { const i = typicalBlock(M); S.flowBlock = i >= 0 ? i : 0; }
   const main = M.layers.filter(L => isMainPass(M, L)), V = M.vocabSize, d = showVal(metaNum(M, 'embedding_length')) || '?', nb = fmtInt(main.length), arch = esc(M.arch);
   if (!V) {                                              // no vocabulary: not a language model (e.g. the image encoder "clip" of an mmproj file)
     const clip = M.arch === 'clip';
@@ -3538,15 +3613,20 @@ function renderFlowBlock() {
   const M = S.model, L = M.layers[S.flowBlock];
   document.querySelectorAll('#flowChain .bstrip button').forEach(b => b.setAttribute('aria-current', String(+b.dataset.b === S.flowBlock)));
   const R = buildRecipe(M, L);
-  $('#flowTitle').textContent = `Block ${L.key}: ${kindLabel(M, L.kind)}`;
-  const same = M.layers.filter(x => x.kind === L.kind).length, sm = fmtInt(same), win = showVal(metaNum(M, 'attention.sliding_window'));
+  $('#flowTitle').textContent = `Block ${L.key}: ${kindLabel(M, L.kind)}` + (L.moe ? tl(' + Experten (MoE)', ' + experts (MoE)') : '');
+  const same = M.layers.filter(x => x.kind === L.kind && !!x.moe === !!L.moe).length, sm = fmtInt(same), win = showVal(metaNum(M, 'attention.sliding_window'));
   const over = L.kind === 'swa' ? tl(`der letzten ${win} Tokens`, `the last ${win} tokens`) : tl('aller vorherigen Tokens', 'all previous tokens');
+  const mla = R.nodes.some(n => n.id === 'kva');
   const mech = R.nodes.some(n => n.id === 'delta')
     ? tl('Statt alle früheren Tokens anzusehen, führt der Block einen festen Speicher mit: Pro Token vergisst er etwas (g), schreibt das neue Paar k → v hinein (β) und liest mit q aus.', 'Instead of looking at all earlier tokens, the block carries a fixed memory: per token it forgets a little (g), writes the new pair k → v (β) and reads with q.')
-    : tl(`Jedes Token vergleicht seine Query mit den Keys ${over} und mischt deren Values.`, `Each token compares its query with the keys of ${over} and mixes their values.`);
+    : tl(`Jedes Token vergleicht seine Query mit den Keys ${over} und mischt deren Values.`, `Each token compares its query with the keys of ${over} and mixes their values.`)
+      + (mla ? tl(' Keys und Values werden dafür stark zusammengepresst gespeichert (Multi-Head Latent Attention); das hält den KV-Cache klein.', ' For this, keys and values are stored strongly compressed (multi-head latent attention), which keeps the KV cache small.') : '');
+  const ms = L.moe && moeStats(M);
+  const moeTxt = ms ? ' ' + tl(`Statt eines FFN hat der Block <b>${fmtInt(ms.N)} Experten</b>: Ein Router wählt für jedes Token die ${fmtInt(ms.k)} passendsten, nur die rechnen${ms.shared ? ', dazu immer der gemeinsame Experte' : ''}.`, `Instead of one FFN the block has <b>${fmtInt(ms.N)} experts</b>: a router picks the ${fmtInt(ms.k)} best-fitting ones for each token, and only those compute${ms.shared ? ', plus the shared expert every time' : ''}.`) + ' ' + ib('moe')
+    : M.layers.some(x => x.moe) && !L.moe && isMainPass(M, L) ? ' ' + tl('Anders als die übrigen Blöcke: ein normales FFN ohne Experten.', 'Unlike the other blocks: a plain FFN without experts.') : '';
   $('#flowLede').innerHTML = L.kind === 'mtp' && M.arch === 'qwen35'
     ? tl('Dieser Zusatz-Block läuft im normalen Durchgang nicht mit. Er rät aus dem Ergebnis des letzten Blocks das übernächste Token voraus; stimmt der Vorschlag, spart das Zeit (spekulatives Dekodieren).', 'This extra block does not run in the normal pass. From the last block’s result it guesses the token after next; if the guess is right, that saves time (speculative decoding).')
-    : (same === 1 ? tl('Der einzige Block dieser Art.', 'The only block of this kind.') : tl(`${sm} Blöcke dieser Art haben denselben Ablauf, nur mit eigenen Tabellen.`, `${sm} blocks of this kind share this flow, each with its own tables.`)) + ' ' + mech;
+    : (same === 1 ? tl('Der einzige Block dieser Art.', 'The only block of this kind.') : tl(`${sm} Blöcke dieser Art haben denselben Ablauf, nur mit eigenen Tabellen.`, `${sm} blocks of this kind share this flow, each with its own tables.`)) + ' ' + mech + moeTxt;
   drawFlow($('#flowDiagram'), R);
   const nt = fmtInt(L.tensors.length), by = fmtBytes(L.bytes);
   $('#flowNote').textContent = tl(`Farbig: Tabelle aus der Datei · grau: Rechenschritt des Programms · ${nt} Tabellen, ${by} · `, `Colored: table from the file · gray: program step · ${nt} tables, ${by} · `)
@@ -3614,15 +3694,16 @@ function renderTour() {
     h = head(tl('Schritt 4 · Die Eingabe', 'Step 4 · The input'), tl(`Zusammen: eine Tabelle mit ${fmtInt(n)} × ${d} Zahlen`, `Together: a table of ${fmtInt(n)} × ${d} numbers`), tl(`Untereinander gelegt ergeben die Zeilen die Eingabe für das Netz: <b>${tot} Zahlen</b>. Ab hier rechnet das Modell nur noch mit Zahlen; Wörter tauchen erst ganz am Ende wieder auf.`, `Stacked on top of each other, the rows form the input to the network: <b>${tot} numbers</b>. From here on the model only computes with numbers; words come back only at the very end.`))
       + `<div class="t-mx"><div class="labs" id="tourMxLabs"></div><canvas class="t-matrix" id="tourMx"></canvas></div><p class="hint">${tl(`Zeilen: deine ${fmtInt(n)} Tokens · Spalten: ${d} Dimensionen (verkleinert)`, `Rows: your ${fmtInt(n)} tokens · columns: ${d} dimensions (scaled down)`)}</p>`;
   } else if (k === 'layers') {
-    const main = M.layers.filter(L => isMainPass(M, L)), P = M.params - (E ? E.nElements : 0);
-    h = head(tl('Schritt 5 · Durch die Schichten', 'Step 5 · Through the layers'), tl(`Diese Tabelle läuft durch ${fmtInt(main.length)} Blöcke`, `This table runs through ${fmtInt(main.length)} blocks`), tl('Jeder Block rechnet alle Zahlen jeder Zeile neu. <b>Attention</b> lässt die Tokens einander „ansehen“ und Informationen austauschen; das <b>FFN</b> verarbeitet danach jedes Token für sich. Jeder Block hat eigene Gewichtstabellen.', 'Each block recomputes every number in every row. <b>Attention</b> lets the tokens “look at” each other and exchange information; the <b>FFN</b> then processes each token on its own. Every block has its own weight tables.'))
+    const main = M.layers.filter(L => isMainPass(M, L)), ms = moeStats(M), P = ms ? ms.active : M.params - (E ? E.nElements : 0);
+    const moeL = ms ? ' ' + tl(`Bei diesem Modell besteht das FFN aus <b>${fmtInt(ms.N)} Experten</b>; ein Router wählt pro Token ${fmtInt(ms.k)} davon aus, nur die rechnen (Mixture of Experts).`, `In this model the FFN consists of <b>${fmtInt(ms.N)} experts</b>; a router picks ${fmtInt(ms.k)} of them per token, and only those compute (mixture of experts).`) : '';
+    h = head(tl('Schritt 5 · Durch die Schichten', 'Step 5 · Through the layers'), tl(`Diese Tabelle läuft durch ${fmtInt(main.length)} Blöcke`, `This table runs through ${fmtInt(main.length)} blocks`), tl('Jeder Block rechnet alle Zahlen jeder Zeile neu. <b>Attention</b> lässt die Tokens einander „ansehen“ und Informationen austauschen; das <b>FFN</b> verarbeitet danach jedes Token für sich. Jeder Block hat eigene Gewichtstabellen.', 'Each block recomputes every number in every row. <b>Attention</b> lets the tokens “look at” each other and exchange information; the <b>FFN</b> then processes each token on its own. Every block has its own weight tables.') + moeL)
       + blockStripHTML(M, -1) + kindsLegend(M)
-      + `<div class="t-big"><div><b>${fmtInt(main.length)}</b><span>${tl('Blöcke', 'blocks')}</span></div><div><b>${fmtParams(M.params)}</b><span>${tl('Gewichte in der Datei', 'weights in the file')}</span></div><div><b>≈ ${fmtParams(2 * P)}</b><span>${tl('Rechenschritte pro Token (grob 2 je Gewicht)', 'operations per token (about 2 per weight)')}</span></div></div>`
+      + `<div class="t-big"><div><b>${fmtInt(main.length)}</b><span>${tl('Blöcke', 'blocks')}</span></div><div><b>${fmtParams(M.params)}</b><span>${tl('Gewichte in der Datei', 'weights in the file')}</span></div>${ms ? `<div><b>≈ ${fmtParams(ms.active)}</b><span>${tl(`davon rechnen pro Token (${fmtInt(ms.k)} von ${fmtInt(ms.N)} Experten)`, `of them compute per token (${fmtInt(ms.k)} of ${fmtInt(ms.N)} experts)`)}</span></div>` : ''}<div><b>≈ ${fmtParams(2 * P)}</b><span>${ms ? tl('Rechenschritte pro Token (grob 2 je aktivem Gewicht)', 'operations per token (about 2 per active weight)') : tl('Rechenschritte pro Token (grob 2 je Gewicht)', 'operations per token (about 2 per weight)')}</span></div></div>`
       + `<p class="t-note">${tl('Diesen Teil rechnet das Programm (llama.cpp, auch in LM Studio). Die Lupe zeigt die Tabellen und den Bauplan, rechnet die Schichten aber nicht selbst nach.', 'This part is computed by the program (llama.cpp, also inside LM Studio). GGUF-Lupe shows the tables and the blueprint but doesn’t compute the layers itself.')}</p>`;
   } else if (k === 'block') {
-    const L = M.layers.find(x => x.kind === 'attn') || M.layers[0];
-    const lin = M.layers.some(x => x.kind === 'lin');
-    h = head(tl('Schritt 6 · Ein Block von innen', 'Step 6 · Inside one block'), `Block ${esc(L ? L.key : '–')}: ${esc(L ? kindLabel(M, L.kind) : '')}`, tl(`Von oben nach unten: Normieren, Attention, wieder aufaddieren, Normieren, FFN, wieder aufaddieren. Farbige Kästen sind Tabellen aus der Datei, graue Kästen Rechenschritte des Programms.${lin ? ' Die meisten Blöcke dieses Modells nutzen statt Attention einen festen Speicher (lineare Attention), siehe Tab „Datenfluss“.' : ''}`, `Top to bottom: normalize, attention, add back, normalize, FFN, add back. Colored boxes are tables from the file; gray boxes are steps of the program.${lin ? ' Most blocks of this model use a fixed memory instead of attention (linear attention); see the “Data flow” tab.' : ''}`))
+    const L = M.layers[typicalBlock(M)] || M.layers[0];
+    const lin = M.layers.some(x => x.kind === 'lin'), moe = L && L.moe;
+    h = head(tl('Schritt 6 · Ein Block von innen', 'Step 6 · Inside one block'), `Block ${esc(L ? L.key : '–')}: ${esc(L ? kindLabel(M, L.kind) : '')}${moe ? tl(' + Experten (MoE)', ' + experts (MoE)') : ''}`, tl(`Von oben nach unten: Normieren, Attention, wieder aufaddieren, Normieren, ${moe ? 'Experten statt FFN: Router wählt, nur die gewählten rechnen, gewichtet mischen' : 'FFN'}, wieder aufaddieren. Farbige Kästen sind Tabellen aus der Datei, graue Kästen Rechenschritte des Programms.${lin ? ' Die meisten Blöcke dieses Modells nutzen statt Attention einen festen Speicher (lineare Attention), siehe Tab „Datenfluss“.' : ''}`, `Top to bottom: normalize, attention, add back, normalize, ${moe ? 'experts instead of an FFN: the router picks, only the chosen ones compute, weighted mix' : 'FFN'}, add back. Colored boxes are tables from the file; gray boxes are steps of the program.${lin ? ' Most blocks of this model use a fixed memory instead of attention (linear attention); see the “Data flow” tab.' : ''}`))
       + `<div class="panel flow-wrap"><div class="flow" id="tourFlow"></div></div>`
       + `<p class="t-lede" style="margin-top:12px">${tl('Die Reihenfolge steht nicht in der Datei, sondern im Programm.', 'The order is not in the file but in the program.')} <button type="button" class="btn" id="tourCode">${tl('Im Original-Quelltext von llama.cpp ansehen →', 'See it in the original llama.cpp source →')}</button></p>`;
   } else if (k === 'output') {
@@ -3695,7 +3776,7 @@ function renderTour() {
       }
     })();
   }
-  if (k === 'block') { const L = M.layers.find(x => x.kind === 'attn') || M.layers[0]; if (L) drawFlow($('#tourFlow'), buildRecipe(M, L), { onOpen: t => { closeTour(); openTensor(t); } }); const tc = $('#tourCode'); if (tc) tc.onclick = () => { closeTour(); setTab('code'); }; }
+  if (k === 'block') { const L = M.layers[typicalBlock(M)] || M.layers[0]; if (L) drawFlow($('#tourFlow'), buildRecipe(M, L), { onOpen: t => { closeTour(); openTensor(t); } }); const tc = $('#tourCode'); if (tc) tc.onclick = () => { closeTour(); setTab('code'); }; }
   if (k === 'map' && E && (M._fullMap || (M.source.kind === 'demo' && M.info.demo.fullmap))) {
     const D = M._fullMap || (M._fullMap = fullMapFromDemo(M)); const fm = new FullMap($('#tourMap')); fm.setData(D); fm.find(S.tourNN != null ? disp(S.tourNN).trim() : tl('Montag', 'Monday')); $('#tourMapStatus').textContent = tl(`Alle ${fmtInt(D.n)} Tokens · exakte Nachbarn in allen ${fmtInt(E.dims[0])} Dimensionen`, `All ${fmtInt(D.n)} tokens · exact neighbors in all ${fmtInt(E.dims[0])} dimensions`);
   } else if (k === 'map' && E) {
@@ -4903,9 +4984,15 @@ const STEP_DE = {
   q_conv_predelta: 'q normieren', k_conv_predelta: 'k normieren', v_conv_predelta: 'v', alpha: 'Zerfall berechnen', a_softplus: 'Zerfall (Softplus)', gate: 'Vergessen',
   beta: 'Schreibstärke berechnen', beta_sigmoid: 'Schreibstärke β', final_output: 'aus dem Speicher lesen', z: 'Gate z', linear_attn_out: 'Ausgabe des Speichers',
   result_output: 'Ausgabe-Kopf', h_nextn: 'Letztes Normieren',
+  ffn_moe_logits: 'Router: Punktzahl je Experte', ffn_moe_probs: 'Router: Passung 0 bis 1', ffn_moe_probs_biased: '+ Ausgleich je Experte', ffn_moe_argsort: 'Experten nach Punktzahl sortieren', ffn_moe_topk: 'die besten wählen',
+  ffn_moe_weights: 'Gewichte der Gewählten', ffn_moe_weights_softmax: 'Gewichte (Softmax)', ffn_moe_weights_sum: 'Gewichte addieren', ffn_moe_weights_sum_clamped: 'nie durch 0 teilen', ffn_moe_weights_norm: 'Gewichte auf Summe 1', ffn_moe_weights_scaled: 'Gewichte skalieren',
+  ffn_moe_gate: 'Experten: Gate (nur die gewählten)', ffn_moe_up: 'Experten: hoch', ffn_moe_swiglu: 'Experten: Aktivierung', ffn_moe_gelu: 'Experten: Aktivierung', ffn_moe_silu: 'Experten: Aktivierung', ffn_moe_down: 'Experten: runter',
+  ffn_moe_weighted: 'Ergebnisse × Gewicht', ffn_moe_out: 'Experten-Ergebnisse addieren', ffn_shexp: 'Gemeinsamer Experte: runter',
+  q_nope_absorbed: 'Query × k_b (in den Komprimat-Raum)', kv_cmpr_pe: 'Key/Value zusammenpressen', kv_cmpr: 'Komprimat × Norm-Gewicht', q_pe: 'Positionsteil der Query drehen', k_pe: 'Positionsteil des Keys drehen', kqv_mla: 'Values aus dem Komprimat',
 };
 const OP_DE = { MUL_MAT: 'Matrix × Vektor', MUL: 'malnehmen', ADD: 'addieren', RMS_NORM: 'normieren', SOFT_MAX: 'Softmax', ROPE: 'drehen (Position)', GATED_DELTA_NET: 'Speicher aktualisieren (DeltaNet)',
-  SSM_CONV: 'Faltung', SILU: 'SiLU', SIGMOID: 'Sigmoid', SOFTPLUS: 'Softplus', SWIGLU: 'SwiGLU', GEGLU: 'GeGLU', GET_ROWS: 'Zeilen holen', SCALE: 'skalieren', CONCAT: 'aneinanderhängen', L2_NORM: 'L2-normieren', GELU: 'GELU', EXP: 'e hoch', SUB: 'subtrahieren', DIV: 'teilen', NEG: 'Vorzeichen' };
+  SSM_CONV: 'Faltung', SILU: 'SiLU', SIGMOID: 'Sigmoid', SOFTPLUS: 'Softplus', SWIGLU: 'SwiGLU', GEGLU: 'GeGLU', GET_ROWS: 'Zeilen holen', SCALE: 'skalieren', CONCAT: 'aneinanderhängen', L2_NORM: 'L2-normieren', GELU: 'GELU', EXP: 'e hoch', SUB: 'subtrahieren', DIV: 'teilen', NEG: 'Vorzeichen',
+  MUL_MAT_ID: 'Matrix × Vektor, nur gewählte Experten', ARGSORT: 'sortieren', TOP_K: 'die besten k', SUM_ROWS: 'Zeilen summieren', CLAMP: 'begrenzen' };
 const STEP_EN = {
   'model.input_embed': 'Fetch embedding row', inp_embd: 'Fetch embedding row', inp_scaled: 'Scale embedding',
   norm: 'Normalize', attn_norm: '× norm weight', attn_post_norm: '× norm weight', ffn_norm: '× norm weight', result_norm: 'Final normalization',
@@ -4918,12 +5005,26 @@ const STEP_EN = {
   q_conv_predelta: 'Normalize q', k_conv_predelta: 'Normalize k', v_conv_predelta: 'v', alpha: 'Compute decay', a_softplus: 'Decay (softplus)', gate: 'Forget',
   beta: 'Compute write strength', beta_sigmoid: 'Write strength β', final_output: 'Read from memory', z: 'Gate z', linear_attn_out: 'Memory output',
   result_output: 'Output head', h_nextn: 'Final normalization',
+  ffn_moe_logits: 'Router: score per expert', ffn_moe_probs: 'Router: fit 0 to 1', ffn_moe_probs_biased: '+ balancing per expert', ffn_moe_argsort: 'Sort experts by score', ffn_moe_topk: 'Pick the best',
+  ffn_moe_weights: 'Weights of the chosen', ffn_moe_weights_softmax: 'Weights (softmax)', ffn_moe_weights_sum: 'Add up weights', ffn_moe_weights_sum_clamped: 'Never divide by 0', ffn_moe_weights_norm: 'Weights to sum 1', ffn_moe_weights_scaled: 'Scale weights',
+  ffn_moe_gate: 'Experts: gate (chosen only)', ffn_moe_up: 'Experts: up', ffn_moe_swiglu: 'Experts: activation', ffn_moe_gelu: 'Experts: activation', ffn_moe_silu: 'Experts: activation', ffn_moe_down: 'Experts: down',
+  ffn_moe_weighted: 'Results × weight', ffn_moe_out: 'Add the experts’ results', ffn_shexp: 'Shared expert: down',
+  q_nope_absorbed: 'Query × k_b (compressed space)', kv_cmpr_pe: 'Compress key/value', kv_cmpr: 'Compressed × norm weight', q_pe: 'Rotate the query’s position part', k_pe: 'Rotate the key’s position part', kqv_mla: 'Values from the compressed vector',
 };
 const OP_EN = { MUL_MAT: 'Matrix × vector', MUL: 'multiply', ADD: 'add', RMS_NORM: 'normalize', SOFT_MAX: 'softmax', ROPE: 'rotate (position)', GATED_DELTA_NET: 'update memory (DeltaNet)',
-  SSM_CONV: 'convolution', SILU: 'SiLU', SIGMOID: 'sigmoid', SOFTPLUS: 'softplus', SWIGLU: 'SwiGLU', GEGLU: 'GeGLU', GET_ROWS: 'fetch rows', SCALE: 'scale', CONCAT: 'concatenate', L2_NORM: 'L2-normalize', GELU: 'GELU', EXP: 'e to the power', SUB: 'subtract', DIV: 'divide', NEG: 'flip sign' };
+  SSM_CONV: 'convolution', SILU: 'SiLU', SIGMOID: 'sigmoid', SOFTPLUS: 'softplus', SWIGLU: 'SwiGLU', GEGLU: 'GeGLU', GET_ROWS: 'fetch rows', SCALE: 'scale', CONCAT: 'concatenate', L2_NORM: 'L2-normalize', GELU: 'GELU', EXP: 'e to the power', SUB: 'subtract', DIV: 'divide', NEG: 'flip sign',
+  MUL_MAT_ID: 'Matrix × vector, chosen experts only', ARGSORT: 'sort', TOP_K: 'the best k', SUM_ROWS: 'sum rows', CLAMP: 'clamp' };
 // label of a graph node / ggml op in the current language; undefined for unknown keys
 const pickLabel = (de, en, k) => Object.hasOwn(de, k) ? (isEN() && en[k]) || de[k] : undefined;
 const stepLabel = k => pickLabel(STEP_DE, STEP_EN, k), opLabel = k => pickLabel(OP_DE, OP_EN, k);
+// the label of one recorded step: a few names mean something else next to experts (the shared expert reuses the plain FFN names)
+const SHEXP_LAB = { ffn_gate: ['Gemeinsamer Experte: Gate', 'Shared expert: gate'], ffn_up: ['Gemeinsamer Experte: hoch', 'Shared expert: up'], ffn_down: ['Gemeinsamer Experte: runter', 'Shared expert: down'] };
+function stepLab(s, op, moe) {
+  const ws = (s.ins || []).filter(x => x.w).map(x => x.w).join(' ');
+  if (/_shexp/.test(ws) && SHEXP_LAB[s.base]) return tl(...SHEXP_LAB[s.base]);
+  if (moe && s.base === 'ffn_out' && (op || s.op) === 'ADD' && (s.ins || []).some(x => /^ffn_(shexp|moe_out)/.test(x.name || ''))) return tl('Experten + gemeinsamer Experte', 'Experts + shared expert');
+  return stepLabel(s.base) || opLabel(op || s.op) || op || s.op;
+}
 const INFO = {   // ⓘ popover texts: [de, en] (or a function using tl)
   run: ['Das Modell rechnet hier wirklich: <b>llama.cpp</b>, dasselbe Programm wie in LM Studio, beantwortet deine Frage mit den Gewichten aus der Datei. Danach wird der ganze Text in einem Durchgang noch einmal gerechnet und dabei <b>jedes Zwischenergebnis</b> mitgeschrieben (höchstens 100 Tokens). Gewählt wird immer das wahrscheinlichste Token, deshalb gibt dieselbe Frage dieselbe Antwort.',
     'The model really computes here: <b>llama.cpp</b>, the same program as in LM Studio, answers your question with the weights from the file. Then the whole text is computed again in a single pass, recording <b>every intermediate result</b> (up to 100 tokens). It always picks the most likely token, so the same question gives the same answer.'],
@@ -4951,12 +5052,30 @@ const INFO = {   // ⓘ popover texts: [de, en] (or a function using tl)
     'What the model proposes as the next token at this position. For the answer, the top one was taken each time.'],
   zoom: ['Eine einzelne Zahl, nachgerechnet aus den echten Eingaben dieses Schritts und, falls vorhanden, der Gewichtszeile aus der GGUF-Datei. Bei Matrix × Vektor rundet llama.cpp die Eingabe vorher auf 8 Bit, um schneller zu rechnen; die Lupe rechnet exakt und mit derselben Rundung nach. Die gerundete Rechnung trifft llama.cpp fast genau, der Rest sind Rundungen beim Aufsummieren.',
     'A single number, recomputed from this step’s real inputs and, if there is one, the weight row from the GGUF file. For matrix × vector, llama.cpp first rounds the input to 8 bits to compute faster; GGUF-Lupe recomputes it both exactly and with the same rounding. The rounded result matches llama.cpp almost exactly; the rest is rounding during summation.'],
+  moe: () => {
+    const M = S.model, s = M && moeStats(M); if (!s) return tl('Mixture of Experts: Statt eines großen FFN hat jeder Block viele kleine, die Experten. Ein Router wählt pro Token wenige davon aus; nur die rechnen.', 'Mixture of experts: instead of one large FFN each block has many small ones, the experts. A router picks a few of them per token; only those compute.');
+    const N = fmtInt(s.N), k = fmtInt(s.k), sh = fmtInt(s.shared), all = fmtParams(M.params), act = fmtParams(s.active);
+    return tl(`<b>Mixture of Experts (MoE):</b> Statt eines großen FFN hat ein Block <b>${N} kleine FFNs</b>, die Experten. Ein <b>Router</b> (eine kleine Tabelle) gibt für jedes Token jedem Experten eine Punktzahl; nur die <b>${k} besten rechnen</b>, ihre Ergebnisse werden nach Punktzahl gewichtet gemischt.${s.shared ? ` Dazu rechnet ${s.shared === 1 ? 'ein gemeinsamer Experte' : `${sh} gemeinsame Experten`} bei jedem Token mit.` : ''} Jedes Token wählt in jedem Block neu.<br><br><b>Wozu?</b> Viel Wissen in der Datei (${all} Gewichte), aber pro Token nur ≈ ${act} Rechenarbeit: Das Modell antwortet fast so schnell wie ein kleines. <b>Der Haken:</b> Alle Experten müssen trotzdem im Speicher liegen, denn jedes Token braucht andere.<br><br>„Experte“ heißt nicht Fachgebiet. Die Aufteilung lernt das Modell selbst; was ein einzelner Experte „kann“, lässt sich meist nicht benennen. Welche Experten ein Token wirklich nimmt, zeigt der Tab „Durchlauf“.`,
+      `<b>Mixture of experts (MoE):</b> instead of one large FFN, a block has <b>${N} small FFNs</b>, the experts. A <b>router</b> (a small table) gives every expert a score for each token; only the <b>${k} best compute</b>, and their results are mixed, weighted by score.${s.shared ? ` In addition, ${s.shared === 1 ? 'one shared expert computes' : `${sh} shared experts compute`} for every token.` : ''} Each token chooses anew in every block.<br><br><b>Why?</b> Lots of knowledge in the file (${all} weights), but only ≈ ${act} worth of compute per token: the model answers almost as fast as a small one. <b>The catch:</b> all experts still have to sit in memory, because every token needs different ones.<br><br>“Expert” does not mean a subject area. The model learns the split by itself; what a single expert “knows” usually can’t be named. Which experts a token really takes is shown in the “Forward pass” tab.`);
+  },
+  moeActive: () => {
+    const M = S.model, s = M && moeStats(M); if (!s) return '';
+    const k = fmtInt(s.k), N = fmtInt(s.N), r = fmtParams(s.routed), rk = fmtParams(s.routed * s.k / s.N);
+    return tl(`Gezählt sind alle Gewichte, die bei einem Token wirklich mitrechnen: Attention, Router, ${s.shared ? 'gemeinsame Experten, ' : ''}Ausgabe-Kopf und von den Experten-Tabellen (${r}) nur der Anteil ${k} von ${N} (≈ ${rk}). Die Embedding-Tabelle wird nur nachgeschlagen, nicht gerechnet${s.emb ? `; Modellkarten zählen sie oft mit, dann wären es ≈ ${fmtParams(s.active + s.emb)}` : ''}. Grob braucht jedes aktive Gewicht 2 Rechenschritte pro Token.`,
+      `Counted are all weights that really compute for a token: attention, router, ${s.shared ? 'shared experts, ' : ''}output head, and of the expert tables (${r}) only the share ${k} of ${N} (≈ ${rk}). The embedding table is only looked up, not computed with${s.emb ? `; model cards often count it too, which gives ≈ ${fmtParams(s.active + s.emb)}` : ''}. Roughly, each active weight costs 2 operations per token.`);
+  },
+  moeRun: () => {
+    const m = RUN.moe || {}, k = fmtInt(m.k || 0), N = fmtInt(m.n_expert || 0), fn = m.gating === 'sigmoid' ? 'Sigmoid' : m.gating === 'softmax' ? 'Softmax' : '';
+    return tl(`<b>Der Router bei der Arbeit:</b> Jeder Balken ist einer der ${N} Experten dieses Blocks, seine Höhe die Passung zum gewählten Token, die der Router berechnet (${fn || 'Punktzahl'}; der höchste Balken ist voll hoch). <b>Farbig: die ${k} gewählten</b>; nur sie rechnen. Die Prozente sind ihr Anteil an der Mischung.${m.bias ? ' <b>Ausgleich:</b> Vor der Auswahl kommt bei diesem Modell ein fester Wert je Experte dazu. Er wurde im Training so eingestellt, dass die Experten im Mittel ähnlich oft drankommen. Darum ist nicht immer der höchste Balken dabei.' : ''}${m.shared ? ' Zusätzlich rechnet bei jedem Token der gemeinsame Experte.' : ''}<br><br>Darunter: welche Experten <b>jedes Token</b> in diesem Block genommen hat, oder <b>dieses Token in jedem Block</b>. Ein Klick wählt Token oder Block.`,
+      `<b>The router at work:</b> each bar is one of the ${N} experts of this block; its height is how well it fits the chosen token, as computed by the router (${fn || 'score'}; the tallest bar is full height). <b>Colored: the ${k} chosen ones</b>; only they compute. The percentages are their share of the mix.${m.bias ? ' <b>Balancing:</b> before choosing, this model adds a fixed value per expert. It was set during training so that the experts get picked about equally often on average. That is why the tallest bar is not always among them.' : ''}${m.shared ? ' In addition, the shared expert computes for every token.' : ''}<br><br>Below: which experts <b>every token</b> took in this block, or <b>this token in every block</b>. Click to pick a token or block.`);
+  },
 };
 const pctf = p => p >= 0.9995 ? '100 %' : p >= 0.1 ? nf(Math.floor(p * 1000) / 10, 1) + ' %' : p >= 0.001 ? nf(p * 100, 2) + ' %' : `< ${nf(0.1, 1)} %`;
 const tokTxt = id => { const ex = RUN.ex; if (ex && !ex.sameVocab) { const t = ex.h.tok && ex.h.tok[String(id)]; return t == null ? '#' + id : t; } return disp(id); };
 const tokHTML = id => { const t = tokTxt(id); return t === '' ? '<span class="ws">∅</span>' : wsHTML(t.length > 24 ? t.slice(0, 22) + '…' : t); };
 const tokQ = id => { const t = tokTxt(id), s = t.trim() ? esc(t.trim()) : wsHTML(t) || '∅'; return tl(`„${s}“`, `“${s}”`); };
-function resetRun() { Object.assign(RUN, { info: null, pos: null, layer: null, dim: null, stack: null, lens: null, blocks: {}, step: null, seq: RUN.seq + 1, ex: null, detail: null }); }
+function resetRun() { Object.assign(RUN, { info: null, pos: null, layer: null, dim: null, stack: null, lens: null, blocks: {}, step: null, seq: RUN.seq + 1, ex: null, detail: null, moe: null, moeP: null, moeScores: {} }); }
+const moeBlock = b => !!(RUN.info && (RUN.info.moe_blocks || []).includes(b));
 
 // ---------- one data layer: live run on the server, or a recorded example (examples/*.js)
 class ExMissing extends Error {}
@@ -4970,6 +5089,8 @@ const RD = {
   stack: p => { if (!RUN.ex) return runBin('/api/run/stack', { run: RUN.info.id, p }); const m = RUN.ex.h.stacks[String(p)], v = m && exArr('stack:' + p); return v ? Promise.resolve({ meta: m, v }) : Promise.reject(new ExMissing('stack')); },
   lens: p => RUN.ex ? (RUN.ex.h.lens[String(p)] ? Promise.resolve(RUN.ex.h.lens[String(p)]) : Promise.reject(new ExMissing('lens'))) : srvJson('/api/run/lens', { run: RUN.info.id, p }),
   block: b => RUN.ex ? Promise.resolve(RUN.ex.h.blocks[String(b)]) : srvJson('/api/run/block', { run: RUN.info.id, b }),
+  moe: () => RUN.ex ? (RUN.ex.h.moe ? Promise.resolve(RUN.ex.h.moe) : Promise.reject(new ExMissing('moe'))) : srvJson('/api/run/moe', { run: RUN.info.id }),
+  moeScores: b => { if (!RUN.ex) return runBin('/api/run/moescores', { run: RUN.info.id, b }); const m = (RUN.ex.h.moeScores || {})[String(b)], v = m && exArr('moe:' + b); return v ? Promise.resolve({ meta: m, v }) : Promise.reject(new ExMissing('moe')); },
   vec: (n, p) => { if (!RUN.ex) return runBin('/api/run/vec', { run: RUN.info.id, n, p }); const m = RUN.ex.h.vecs[`${n}:${p}`], v = m && exArr(`vec:${n}:${p}`); return v ? Promise.resolve({ meta: m, v }) : Promise.reject(new ExMissing('vec')); },
   explain: (n, p, j) => {
     if (!RUN.ex) return srvJson('/api/run/explain', { run: RUN.info.id, n, p, j });
@@ -5165,7 +5286,7 @@ async function startRun(e) {
   } catch (err) { st.innerHTML = tl('<b>Fehler:</b> ', '<b>Error:</b> ') + esc(srvMsg(err.message)); }
   finally { RUN.busy = false; $('#runGo').disabled = false; prog.hidden = true; }
 }
-function drawRunAll() { renderRunToks(); drawStack(); drawPlane(); drawDim(); renderLens(); renderBlock(); renderAttn(); renderOut(); }
+function drawRunAll() { renderRunToks(); drawStack(); drawPlane(); drawDim(); renderLens(); renderBlock(); renderAttn(); renderOut(); renderMoe(); }
 
 // ---------- tokens
 function renderRunToks() {
@@ -5185,13 +5306,13 @@ async function selectPos(k, first) {
   try {
     const [st, lens] = await Promise.all([RD.stack(k).catch(e => { if (e instanceof ExMissing) return null; throw e; }), RD.lens(k).catch(e => ({ error: e instanceof ExMissing ? null : e.message }))]);
     if (seq !== RUN.seq) return;
-    if (!st) { RUN.stack = null; RUN.lens = null; showNoStack(); renderOut(); renderAttn(); if (first) renderBlock(); return; }
+    if (!st) { RUN.stack = null; RUN.lens = null; showNoStack(); renderOut(); renderAttn(); renderMoe(); if (first) renderBlock(); return; }
     $('.run-grid').hidden = false; $('#runMiss').hidden = true;
     const d = st.meta.cols, C = Math.round(Math.sqrt(d * 1.25)), R = Math.ceil(d / C);
     RUN.stack = { v: st.v, rows: st.meta.rows, cols: d, C, R, rms: st.meta.rms, planes: null };
     RUN.lens = lens.error ? null : lens; RUN.lensErr = lens.error || null;
     if (RUN.dim == null || first) { const L = RUN.layer, o = L * d; let best = 0; for (let j = 1; j < d; j++) if (Math.abs(st.v[o + j]) > Math.abs(st.v[o + best])) best = j; RUN.dim = best; }
-    drawStack(); drawPlane(); drawDim(); renderLens(); renderOut(); renderAttn();
+    drawStack(); drawPlane(); drawDim(); renderLens(); renderOut(); renderAttn(); renderMoe();
     if (RUN.step != null) openStep(RUN.step, true);
     if (first) renderBlock();
   } catch (e) { $('#runStatus').innerHTML = tl('<b>Fehler:</b> ', '<b>Error:</b> ') + esc(srvMsg(e.message)); }
@@ -5201,7 +5322,7 @@ function selectLayer(L) {
   L = Math.max(0, Math.min(rows - 1, L)); if (L === RUN.layer) return;
   RUN.layer = L; RUN.step = null;
   $('#runLayer').value = L;
-  drawStack(); drawPlane(); drawDim(); renderLens(); renderBlock(); renderAttn();
+  drawStack(); drawPlane(); drawDim(); renderLens(); renderBlock(); renderAttn(); renderMoe();
 }
 const layerName = L => L === 0 ? tl('Embedding (vor Block 1)', 'Embedding (before block 1)') : tl(`nach Block ${L}`, `after block ${L}`);
 
@@ -5363,8 +5484,8 @@ async function renderBlock() {
     $('#runToEmb').onclick = () => { setTab('embed'); jumpToRow(tok); };
     return;
   }
-  const b = L - 1, kind = I.layer_kinds[b];
-  $('#runBlockTitle').innerHTML = (kind === 'attn' ? tl(`Block ${L}: Attention und FFN`, `Block ${L}: Attention and FFN`) : kind === 'lin' ? tl(`Block ${L}: Lineare Attention (Speicher) und FFN`, `Block ${L}: Linear attention (memory) and FFN`) : tl(`Block ${L}: Rechenschritte und FFN`, `Block ${L}: Steps and FFN`)) +
+  const b = L - 1, kind = I.layer_kinds[b], ff = moeBlock(b) ? tl('Experten (MoE)', 'experts (MoE)') : 'FFN';
+  $('#runBlockTitle').innerHTML = (kind === 'attn' ? tl(`Block ${L}: Attention und ${ff}`, `Block ${L}: Attention and ${ff}`) : kind === 'lin' ? tl(`Block ${L}: Lineare Attention (Speicher) und ${ff}`, `Block ${L}: Linear attention (memory) and ${ff}`) : tl(`Block ${L}: Rechenschritte und ${ff}`, `Block ${L}: Steps and ${ff}`)) +
     ` ${ib('block')} <span class="seg sm rf-nav" role="group" aria-label="${tl('Schritt für Schritt', 'Step by step')}"><button type="button" data-st="-1">${tl('◀ Schritt', '◀ Step')}</button><button type="button" data-st="1">${tl('Schritt ▶', 'Step ▶')}</button></span>`;
   $('#runBlockTitle').querySelector('.rf-nav').onclick = e => { const x = e.target.closest('[data-st]'); if (x) stepNav(+x.dataset.st); };
   let data = RUN.blocks[b];
@@ -5389,7 +5510,7 @@ function stepNav(dir) {
 }
 function stepChip(s, k, I, wshort) {
   {
-    const lab = stepLabel(s.base) || opLabel(s.op) || s.op, ws = s.ins.filter(x => x.w), size = s.ne[0] * (s.tok ? (s.ne[2] > 1 && s.ne[1] !== I.tokens.length ? s.ne[1] : 1) : 1);
+    const lab = stepLab(s, s.op, moeBlock(RUN.layer - 1)), ws = s.ins.filter(x => x.w), size = s.ne[0] * (s.tok ? (s.ne[2] > 1 && s.ne[1] !== I.tokens.length ? s.ne[1] : 1) : 1);
     return `${k ? '<span class="rf-ar" aria-hidden="true">→</span>' : ''}<button type="button" class="rf${s.i === RUN.step ? ' sel' : ''}" data-n="${s.i}" style="--c:var(${COMPS[s.comp] ? COMPS[s.comp].v : '--c-other'})"><b>${esc(lab)}</b><small class="mono">${esc(s.name)}</small>${ws.map(x => `<em class="mono">× ${esc(wshort(x.w))}</em>`).join('')}</button>`;
   }
 }
@@ -5402,7 +5523,7 @@ async function openStep(n, keep) {
     const { meta, v } = await RD.vec(n, RUN.pos);
     if (RUN.step !== n) return;
     const s = (RUN.blocks[RUN.layer - 1] || { steps: [] }).steps.find(x => x.i === n) || { base: meta.name, op: meta.op, ins: [] };
-    const lab = stepLabel(s.base) || opLabel(meta.op) || meta.op;
+    const lab = stepLab(s, meta.op, moeBlock(RUN.layer - 1));
     const shape = meta.shape.filter((x, k) => k === 0 || x > 1), heads = shape.length > 1 ? shape[1] : 1;
     const ins = (s.ins || []).map(x => x.w ? `<button type="button" class="linkbtn mono" data-w="${esc(x.w)}">${esc(x.w)}</button>` : `<span class="mono">${esc(x.name)}</span>`).join(' , ');
     const all = (RUN.blocks[RUN.layer - 1] || { steps: [] }).steps, no = all.findIndex(x => x.i === n);
@@ -5537,6 +5658,88 @@ async function renderAttn() {
   head.innerHTML = `Block ${L}`; box.innerHTML = `<p class="count">${tl('Für diese Schicht gibt es keine Aufmerksamkeits-Tabelle.', 'No attention table for this layer.')}</p>`;
 }
 
+// ---------- mixture of experts: which experts the router picked
+async function renderMoe() {
+  const I = RUN.info, sec = $('#runMoe'); if (!I || !sec) return;
+  const blocks = I.moe_blocks || [];
+  if (!blocks.length) { sec.hidden = true; return; }
+  sec.hidden = false;
+  const head = $('#runMoeTitle'), box = $('#runMoeBody'), L = RUN.layer, pos = RUN.pos, b = L - 1, run = RUN.info;
+  if (!RUN.moe) {
+    box.innerHTML = `<p class="count">${tl('lädt …', 'loading…')}</p>`;
+    const p = RUN.moeP ||= RD.moe();
+    let m; try { m = await p; } catch (e) { if (RUN.info !== run) return; if (RUN.moeP === p) RUN.moeP = null; head.innerHTML = tl('Experten (MoE)', 'Experts (MoE)'); box.innerHTML = e instanceof ExMissing ? `<p class="count">${tl('In diesem Beispiel nicht gespeichert.', 'Not stored in this example.')}</p>` : tl('Fehler: ', 'Error: ') + esc(srvMsg(e.message)); return; }
+    if (RUN.info !== run) return;                       // a newer run took over meanwhile
+    RUN.moe = m;
+    if (RUN.layer !== L || RUN.pos !== pos) return;
+  }
+  const M = RUN.moe, N = M.n_expert, x = M.blocks[String(b)], tq = tokQ(I.tokens[pos]);
+  let top = '';
+  if (!x) {
+    const first = blocks[0] + 1;
+    head.innerHTML = tl('Experten (MoE)', 'Experts (MoE)') + ' ' + ib('moeRun');
+    top = `<p class="count">${L === 0 ? tl('Embedding: Hier rechnen noch keine Experten.', 'Embedding: no experts compute here yet.') : tl(`Block ${L} hat keine Experten, sondern ein normales FFN.`, `Block ${L} has no experts, just a plain FFN.`)} <button type="button" class="linkbtn" data-go="${first}">${tl(`Block ${first} ansehen`, `View block ${first}`)}</button></p>`;
+  } else {
+    head.innerHTML = tl(`Block ${L}: Welche Experten rechnen für ${tq}?`, `Block ${L}: Which experts compute for ${tq}?`) + ' ' + ib('moeRun');
+    let sc = RUN.moeScores[b];
+    if (sc === undefined) {
+      let keep = true;
+      try { sc = await RD.moeScores(b); } catch (e) { sc = null; keep = e instanceof ExMissing; }   // a passing error is tried again next time
+      if (RUN.info !== run) return;
+      if (keep) RUN.moeScores[b] = sc;
+      if (RUN.layer !== L || RUN.pos !== pos) return;
+    }
+    const ids = x.ids[pos], w = x.w ? x.w[pos] : null, ws = w ? w.reduce((a, c) => a + c, 0) : 0, share = j => w && ws ? w[j] / ws : null;
+    const pick = new Map(ids.map((e, j) => [e, j]));
+    const row = sc ? Array.from({ length: N }, (_, e) => sc.v[pos * N + e] + (sc.meta.offset || 0)) : null;
+    const hi = row ? Math.max(...row) : 1, lo = row ? Math.min(0, ...row) : 0, fit = tl('Passung', 'fit');
+    const bars = Array.from({ length: N }, (_, e) => { const j = pick.get(e), p = row ? row[e] : null, h = row ? Math.max(2, (p - lo) / ((hi - lo) || 1) * 100) : (j != null ? 100 : 4);
+      return `<i class="${j != null ? 'on' : ''}" style="height:${h.toFixed(1)}%" title="${tl('Experte', 'Expert')} ${e}${p != null ? ` · ${fit} ${pctf(p)}` : ''}${j != null ? ` · ${tl('gewählt', 'chosen')}${share(j) != null ? `, ${tl('Anteil', 'share')} ${pctf(share(j))}` : ''}` : ''}"></i>`; }).join('');
+    const labs = Array.from({ length: N }, (_, e) => pick.has(e) ? `<b>${e}</b>` : '<span></span>').join('');
+    const pills = ids.map((e, j) => `<span class="mx-pill">${tl('Experte', 'Expert')} <b>${e}</b>${share(j) != null ? ` · ${pctf(share(j))}` : ''}</span>`).join('') + (M.shared ? `<span class="mx-pill sh">+ ${tl('gemeinsamer Experte', 'shared expert')}</span>` : '');
+    top = `<div class="mx-bars" style="--n:${N}" role="img" aria-label="${tl(`Passung aller ${N} Experten, die gewählten farbig`, `Fit of all ${N} experts, chosen ones colored`)}">${bars}</div><div class="mx-labs" style="--n:${N}" aria-hidden="true">${labs}</div>
+      <div class="mx-pick"><span class="count">${tl(`${M.k} von ${N} gewählt:`, `${M.k} of ${N} chosen:`)}</span>${pills}</div>
+      <p class="count">${row ? tl(`Balken: ${fit} laut Router · farbig: gewählt, nur diese rechnen · Prozent: Anteil an der Mischung`, `Bars: ${fit} per the router · colored: chosen, only these compute · percent: share of the mix`) : tl('Farbig: gewählt, nur diese rechnen', 'Colored: chosen, only these compute')}</p>`;
+  }
+  const view = x ? RUN.moeView || 'toks' : 'blocks';
+  box.innerHTML = top + `<div class="mx-map-h"><b>${view === 'toks' ? tl(`Block ${L}: welche Experten jedes Token nahm`, `Block ${L}: which experts each token took`) : tl(`${tq}: gewählte Experten in jedem Block`, `${tq}: chosen experts in every block`)}</b>${x ? `<span class="seg sm" role="group" aria-label="${tl('Ansicht', 'View')}"><button type="button" data-mv="toks" aria-pressed="${view === 'toks'}">${tl('alle Tokens', 'all tokens')}</button><button type="button" data-mv="blocks" aria-pressed="${view === 'blocks'}">${tl('alle Blöcke', 'all blocks')}</button></span>` : ''}</div>
+    <div class="mx-map"><canvas id="moeMap"></canvas></div><p class="count" id="moeMapInfo"></p>`;
+  box.onclick = e => { const g = e.target.closest('[data-go]'); if (g) { selectLayer(+g.dataset.go); return; } const v = e.target.closest('[data-mv]'); if (v) { RUN.moeView = v.dataset.mv; renderMoe(); } };
+  RUN.moeMap = view; drawMoeMap();
+}
+function drawMoeMap() {
+  const cv = $('#moeMap'), M = RUN.moe, I = RUN.info; if (!cv || !M || !I || !cv.offsetParent) return;
+  const view = RUN.moeMap, N = M.n_expert, blocks = I.moe_blocks, pos = RUN.pos, b = RUN.layer - 1, T = theme(), moeC = css('--c-moe');
+  const rows = view === 'toks' ? I.tokens.length : blocks.length, rowIds = r => view === 'toks' ? M.blocks[String(b)].ids[r] : M.blocks[String(blocks[r])].ids[pos];
+  const rowW = r => { const x = view === 'toks' ? M.blocks[String(b)] : M.blocks[String(blocks[r])], w = x.w && x.w[view === 'toks' ? r : pos]; if (!w) return null; const s = w.reduce((a, c) => a + c, 0) || 1; return w.map(v => v / s); };
+  const W = Math.max(240, cv.parentElement.clientWidth), LW = Math.min(110, Math.round(W * 0.2)), cw = (W - LW - 4) / N, rh = Math.max(4, Math.min(14, Math.floor(460 / rows))), H = rows * rh + 18, dpr = devicePixelRatio || 1;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = T.sunken; ctx.fillRect(LW, 0, W - LW - 4, rows * rh);
+  const cur = view === 'toks' ? pos : blocks.indexOf(b), count = new Array(N).fill(0);
+  for (let r = 0; r < rows; r++) {
+    const ids = rowIds(r), ws = rowW(r), mw = ws ? Math.max(...ws) : 1;
+    ids.forEach((e, j) => { count[e]++; ctx.globalAlpha = ws ? 0.35 + 0.65 * ws[j] / mw : 1; ctx.fillStyle = moeC; ctx.fillRect(LW + e * cw, r * rh, Math.max(1, cw - (cw > 4 ? 1 : 0)), rh - (rh > 5 ? 1 : 0)); });
+  }
+  ctx.globalAlpha = 1;
+  ctx.font = `${Math.min(11, rh)}px ${view === 'toks' ? T.mono : T.ui}`; ctx.fillStyle = T.ink2; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  const fit = s => { if (ctx.measureText(s).width <= LW - 8) return s; let t = s; while (t.length > 1 && ctx.measureText(t + '…').width > LW - 8) t = t.slice(0, -1); return t + '…'; };
+  if (rh >= 8) for (let r = 0; r < rows; r++) { const lab = view === 'toks' ? wsPlain(tokTxt(I.tokens[r])).slice(0, 14) : `Block ${blocks[r] + 1}`; ctx.fillText(fit(lab), LW - 6, r * rh + rh / 2); }
+  if (cur >= 0) { ctx.strokeStyle = T.ink; ctx.lineWidth = 1.5; ctx.strokeRect(LW - 1, cur * rh - 0.5, W - LW - 2, rh + 1); }
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'center'; ctx.fillStyle = T.muted; ctx.font = `11px ${T.ui}`;
+  for (const e of [0, Math.round(N / 2), N - 1]) ctx.fillText(tl(`Experte ${e}`, `expert ${e}`), Math.min(W - 40, Math.max(LW + 30, LW + (e + 0.5) * cw)), rows * rh + 14);
+  RUN.moeGeo = { LW, cw, rh, rows, N, view };
+  const used = count.filter(c => c).length, best = count.indexOf(Math.max(...count));
+  $('#moeMapInfo').innerHTML = view === 'toks'
+    ? tl(`Jedes Token wählt andere: Im ganzen Text nutzt dieser Block ${fmtInt(used)} der ${fmtInt(N)} Experten, am häufigsten Experte ${best} (${fmtInt(count[best])}×). Klick wählt ein Token.`, `Every token picks differently: across the whole text this block uses ${fmtInt(used)} of its ${fmtInt(N)} experts, most often expert ${best} (${fmtInt(count[best])}×). Click to pick a token.`)
+    : tl(`Jeder Block hat eigene ${fmtInt(N)} Experten: Experte ${best} in einem Block ist ein anderer als in einem anderen. Klick wählt einen Block.`, `Every block has its own ${fmtInt(N)} experts: expert ${best} in one block is a different one than in another. Click to pick a block.`);
+  const hit = e => { const g = RUN.moeGeo, r0 = cv.getBoundingClientRect(), y = e.clientY - r0.top, x = e.clientX - r0.left, r = Math.floor(y / g.rh); return r >= 0 && r < g.rows ? { r, e: x >= g.LW ? Math.floor((x - g.LW) / g.cw) : null } : null; };
+  cv.onmousemove = e => { const h = hit(e); if (!h) return hideTip(); const ids = rowIds(h.r), ws = rowW(h.r), who = view === 'toks' ? tokQ(I.tokens[h.r]) : `Block ${blocks[h.r] + 1}`;
+    showTip(`${who}: ${tl('Experten', 'experts')} ${ids.map((x, j) => `<b>${x}</b>${ws ? ` (${pctf(ws[j])})` : ''}`).join(', ')}<br><span class="m">${view === 'toks' ? tl('Klick wählt dieses Token', 'Click to pick this token') : tl('Klick wählt diesen Block', 'Click to pick this block')}</span>`, e); };
+  cv.onmouseleave = hideTip;
+  cv.onclick = e => { const h = hit(e); if (!h) return; hideTip(); if (view === 'toks') selectPos(h.r); else selectLayer(blocks[h.r] + 1); };
+}
+
 // ---------- next token at this position
 function renderOut() {
   const I = RUN.info, box = $('#runOut'), pos = RUN.pos; if (!I) return;
@@ -5570,7 +5773,7 @@ function initRunTab() {
   pc.addEventListener('mousemove', e => { if (!RUN.stack) return; const d = planeIdx(e); if (d == null) return hideTip(); showTip(`Dimension ${fmtInt(d)}: <b>${sig(RUN.stack.v[RUN.layer * RUN.stack.cols + d], 4)}</b>`, e); });
   pc.addEventListener('mouseleave', hideTip);
   pc.addEventListener('click', e => { if (!RUN.stack) return; const d = planeIdx(e); if (d != null) selectDim(d); });
-  if (window.ResizeObserver) new ResizeObserver(() => { if (RUN.stack && S.tab === 'run') { drawStack(); drawPlane(); drawDim(); drawStripe(); } }).observe($('#runBody'));
+  if (window.ResizeObserver) new ResizeObserver(() => { if (RUN.stack && S.tab === 'run') { drawStack(); drawPlane(); drawDim(); drawStripe(); } if (RUN.moe && S.tab === 'run') drawMoeMap(); }).observe($('#runBody'));
 }
 
 // ---------- tables ----------
