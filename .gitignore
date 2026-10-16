@@ -21,3 +21,6 @@ src/case.txt
 
 # screenshots written by the e2e test scripts
 src/shots*/
+
+# portable package (src/make_portable.py), published as a release asset
+dist/

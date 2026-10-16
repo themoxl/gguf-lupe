@@ -52,7 +52,11 @@ Ein kleines Python-Programm auf deinem eigenen Rechner, das auf der Grafikkarte 
 
 ### Was du brauchst
 
-- Python 3.9 oder neuer mit `numpy` und `gguf`: `pip install numpy gguf`
+**Windows ohne Installation:** das portable Paket `gguf-lupe-portable-win64.zip` von den [Releases](https://github.com/themoxl/gguf-lupe/releases) entpacken und `start-lupe-server.cmd` doppelklicken. Python, `numpy`, `gguf` und llama.cpp (Vulkan, läuft auch auf der CPU) sind dabei; keine Admin-Rechte, kein Internet nötig. Selbst bauen: `python src/make_portable.py`.
+
+Sonst:
+
+- Python 3.9 oder neuer mit `numpy` und `gguf`: `pip install numpy gguf` (unter Windows bietet `start-lupe-server.cmd` das auch selbst an)
 - Optional [PyTorch](https://pytorch.org), für NVIDIA-Grafikkarten (CUDA), Apple-Chips (MPS) oder eine schnellere CPU
 
 Mit conda:

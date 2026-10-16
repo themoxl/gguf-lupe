@@ -52,7 +52,11 @@ A small Python program on your own computer that computes on GPU or CPU. It adds
 
 ### Requirements
 
-- Python 3.9+ with `numpy` and `gguf`: `pip install numpy gguf`
+**Windows, nothing to install:** unzip the portable package `gguf-lupe-portable-win64.zip` from the [releases](https://github.com/themoxl/gguf-lupe/releases) and double-click `start-lupe-server.cmd`. Python, `numpy`, `gguf` and llama.cpp (Vulkan, also runs on the CPU) are included; no admin rights, no internet needed. To build it yourself: `python src/make_portable.py`.
+
+Otherwise:
+
+- Python 3.9+ with `numpy` and `gguf`: `pip install numpy gguf` (on Windows, `start-lupe-server.cmd` offers to do this for you)
 - Optional: [PyTorch](https://pytorch.org), for NVIDIA GPUs (CUDA), Apple chips (MPS) or a faster CPU
 
 With conda:
