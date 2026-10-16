@@ -10,13 +10,22 @@ What goes in:
 PyTorch stays out (about 3 GB); without it the server computes with numpy, only a bit slower.
 Needs internet while building (python.org, PyPI), not when the package is used.
 """
-import argparse, glob, os, shutil, subprocess, sys, urllib.request, zipfile
+import argparse, glob, os, shutil, subprocess, sys, time, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SERVER = ['lupe_server.py', 'lupe_run.py', 'lupe_worker.py', 'lupe_infer.py', 'lupe_export.py', 'make_example.py', 'requirements.txt', 'LICENSE-llama.cpp']
 TOP = ['gguf-lupe.html', 'start-lupe-server.cmd', 'README.md', 'README.de.md', 'LICENSE', 'NOTICE.md']
 LLAMA_KEEP = ['llama.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-vulkan.dll', 'ggml-cpu-*.dll', 'libomp.dll', 'LICENSE*']
+
+
+def wipe(d):
+    for _ in range(10):                      # a virus scanner may still hold freshly written DLLs for a moment
+        shutil.rmtree(d, ignore_errors=True)
+        if not os.path.exists(d):
+            return
+        time.sleep(1)
+    sys.exit(f'{d} lässt sich nicht löschen (noch geöffnet?)')
 
 
 def fetch(url, dest):
@@ -38,7 +47,7 @@ def main():
     a = ap.parse_args()
     name = 'gguf-lupe-portable-win64'
     out, cache = os.path.join(a.out, name), os.path.join(a.out, '_cache')
-    shutil.rmtree(out, ignore_errors=True)
+    wipe(out)
     os.makedirs(cache, exist_ok=True)
 
     print('1. Python', a.python, '(embeddable)')
