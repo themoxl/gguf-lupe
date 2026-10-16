@@ -4144,10 +4144,15 @@ async function renderServerBar() {
   const devs = info.devices, gpu = devs.find(d => d.kind === 'GPU'), auto = devLabel(devs.find(d => d.id === info.default_device) || devs[0]).split(' · ')[0];
   const opts = [['auto', tl(`Automatisch (${auto})`, `Automatic (${auto})`)], ...devs.map(d => [d.id, devLabel(d)])], dir = esc(info.cache_dir || '~/.cache/gguf-lupe');
   bar.innerHTML = `<span class="srv-dot" aria-hidden="true"></span><b>${tl('Lupe-Server verbunden', 'Lupe server connected')}</b>
-    <label for="srvDev">${tl('Rechnen auf', 'Compute on')}</label><select id="srvDev">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === SRV.device ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>
+    <label for="srvDev">${tl('Rechnen auf', 'Compute on')}</label><select id="srvDev">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === SRV.device ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select><span class="count" id="srvGpuNote" hidden></span>
     <label for="srvModel">${tl('Modell', 'Model')}</label><select id="srvModel"><option value="">${tl('lade Liste …', 'loading list …')}</option></select><button type="button" class="btn" id="srvOpen">${tl('Öffnen', 'Open')}</button>
     <details><summary>${tl('ⓘ Speicherorte', 'ⓘ Storage locations')}</summary><p class="cap">${tl(`Berechnete Karten: <code>${dir}</code> · eine Datei je Modell, beim nächsten Öffnen wiederverwendet.`, `Computed maps: <code>${dir}</code> · one file per model, reused next time.`)}</p><p class="cap" id="srvHistoryInfo"></p><p class="cap">${tl('GGUF-Dateien bleiben, wo sie sind; entpackte Tabellen liegen nur im Arbeitsspeicher. Im Browser gewählte Dateien musst du neu auswählen.', 'GGUF files stay where they are; unpacked tables live only in memory. Files picked in the browser must be picked again.')}</p></details>`;
   $('#srvDev').onchange = e => { SRV.device = e.target.value; try { localStorage.setItem('lupe-device', SRV.device); } catch {} if (S.model) S.model._srvLoaded = null; };
+  if (!gpu) srvJson('/api/llm/info').then(L => {          // no PyTorch: the server's own maths stay on the CPU, but llama.cpp still sees the GPU
+    const g = (L.devices || []).filter(d => d.kind === 'GPU').sort((a, b) => b.total_gb - a.total_gb)[0], el = $('#srvGpuNote');
+    if (!g || !el) return;
+    el.hidden = false; el.innerHTML = tl(`${esc(g.name)}: rechnet im Durchlauf`, `${esc(g.name)}: used in the forward pass`) + ' ' + ib('srvGpu');
+  }).catch(() => {});
   const models = SRV.models || await fetch('/api/models').then(r => r.json()).catch(() => []);
   SRV.models = models;
   renderServerModels(keep);
@@ -5058,6 +5063,8 @@ const INFO = {   // ⓘ popover texts: [de, en] (or a function using tl)
     return tl(`<b>Mixture of Experts (MoE):</b> Statt eines großen FFN hat ein Block <b>${N} kleine FFNs</b>, die Experten. Ein <b>Router</b> (eine kleine Tabelle) gibt für jedes Token jedem Experten eine Punktzahl; nur die <b>${k} besten rechnen</b>, ihre Ergebnisse werden nach Punktzahl gewichtet gemischt.${s.shared ? ` Dazu rechnet ${s.shared === 1 ? 'ein gemeinsamer Experte' : `${sh} gemeinsame Experten`} bei jedem Token mit.` : ''} Jedes Token wählt in jedem Block neu.<br><br><b>Wozu?</b> Viel Wissen in der Datei (${all} Gewichte), aber pro Token nur ≈ ${act} Rechenarbeit: Das Modell antwortet fast so schnell wie ein kleines. <b>Der Haken:</b> Alle Experten müssen trotzdem im Speicher liegen, denn jedes Token braucht andere.<br><br>„Experte“ heißt nicht Fachgebiet. Die Aufteilung lernt das Modell selbst; was ein einzelner Experte „kann“, lässt sich meist nicht benennen. Welche Experten ein Token wirklich nimmt, zeigt der Tab „Durchlauf“.`,
       `<b>Mixture of experts (MoE):</b> instead of one large FFN, a block has <b>${N} small FFNs</b>, the experts. A <b>router</b> (a small table) gives every expert a score for each token; only the <b>${k} best compute</b>, and their results are mixed, weighted by score.${s.shared ? ` In addition, ${s.shared === 1 ? 'one shared expert computes' : `${sh} shared experts compute`} for every token.` : ''} Each token chooses anew in every block.<br><br><b>Why?</b> Lots of knowledge in the file (${all} weights), but only ≈ ${act} worth of compute per token: the model answers almost as fast as a small one. <b>The catch:</b> all experts still have to sit in memory, because every token needs different ones.<br><br>“Expert” does not mean a subject area. The model learns the split by itself; what a single expert “knows” usually can’t be named. Which experts a token really takes is shown in the “Forward pass” tab.`);
   },
+  srvGpu: ['Zwei Dinge rechnen hier: Die <b>Lupe selbst</b> (Landkarte, ähnliche Wörter, Wort-Rechnen) nutzt die Grafikkarte nur mit PyTorch; ohne rechnet sie mit numpy auf der CPU, dasselbe Ergebnis, nur langsamer. Das <b>Modell</b> rechnet im Tab „Durchlauf“ mit llama.cpp, und das nutzt die Grafikkarte auch ohne PyTorch. Ist das Modell größer als der Grafikspeicher, kommen so viele Blöcke auf die Karte, wie hineinpassen; den Rest rechnet die CPU.',
+    'Two things compute here: <b>GGUF-Lupe itself</b> (map, similar words, word arithmetic) uses the GPU only with PyTorch; without it, it computes with numpy on the CPU, same result, just slower. The <b>model</b> runs in the “Forward pass” tab with llama.cpp, which uses the GPU even without PyTorch. If the model is larger than the GPU memory, as many blocks as fit go onto the card and the CPU computes the rest.'],
   moeActive: () => {
     const M = S.model, s = M && moeStats(M); if (!s) return '';
     const k = fmtInt(s.k), N = fmtInt(s.N), r = fmtParams(s.routed), rk = fmtParams(s.routed * s.k / s.N);
@@ -5244,7 +5251,8 @@ async function renderRunTab() {
   note.hidden = true; form.hidden = false;
   const sel = $('#runDev');
   if (!sel.options.length) {
-    sel.innerHTML = L.devices.map(d => `<option value="${esc(d.id)}">${esc(d.kind === 'CPU' ? 'CPU' : d.name)}${d.kind !== 'CPU' ? ` (${esc(d.backend)}, ${nf(d.total_gb, 0)} GB)` : ''}</option>`).join('');
+    const part = d => d.kind !== 'CPU' && M.h && M.h.fileSize > ((d.free_gb || d.total_gb) - 1) * 1e9;   // the Lupe then loads only the last blocks onto it
+    sel.innerHTML = L.devices.map(d => `<option value="${esc(d.id)}">${esc(d.kind === 'CPU' ? 'CPU' : d.name)}${d.kind !== 'CPU' ? ` (${esc(d.backend)}, ${nf(d.total_gb, 0)} GB${part(d) ? tl(', passt nur teilweise', ', fits only partly') : ''})` : ''}</option>`).join('');
     const gpu = L.devices.filter(d => d.kind === 'GPU').sort((a, b) => b.total_gb - a.total_gb)[0];
     sel.value = gpu ? gpu.id : 'cpu';
   }

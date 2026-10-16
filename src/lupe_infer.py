@@ -217,9 +217,39 @@ def get_lib(build_dir):
 
 
 # ---------------------------------------------------------------- a loaded model with its recorder
+def gpu_layers(path, free_gb):
+    """How many blocks fit into the GPU's free memory: -1 = all (and the output head), else n (llama.cpp offloads the
+    last n blocks; the rest and the output head stay on the CPU). Also returns the number of blocks in the normal pass.
+    LUPE_GPU_GB sets the memory to plan with (to leave room for other programs, or to try it on a big card)."""
+    import re
+    from gguf import GGUFReader
+    free = float(os.environ.get('LUPE_GPU_GB') or free_gb) * 1e9
+    per, head = {}, 0
+    for t in GGUFReader(path).tensors:
+        m = re.match(r'blk\.(\d+)\.', t.name)
+        if m:
+            if '.nextn.' in t.name:                                   # multi-token prediction block: not loaded (load_mtp off)
+                per[int(m.group(1))] = None
+            elif per.get(int(m.group(1)), 0) is not None:
+                per[int(m.group(1))] = per.get(int(m.group(1)), 0) + int(t.n_bytes)
+        elif t.name.startswith('output.'):
+            head += int(t.n_bytes)
+    blocks = [per[i] for i in sorted(per) if per[i] is not None]
+    budget = free - max(1.0e9, 0.08 * free)                           # room for the compute buffers, the logits and the KV cache
+    if sum(blocks) + head <= budget:
+        return -1, len(blocks)
+    n, used = 0, 0
+    for b in reversed(blocks):
+        if used + b > budget:
+            break
+        n, used = n + 1, used + b
+    return n, len(blocks)
+
+
 class Engine:
     N_CTX = 256          # room for the 100-token limit (llama.cpp pads the KV cache)
     MAX_TOKENS = 100
+    gpu_from = 0         # first block on the GPU when only part of the model fits (0: all on one device)
 
     def __init__(self, lib, path, device_index=None, progress=None):
         """device_index: index from lib.devices() of a GPU, or None for CPU only."""
@@ -233,8 +263,11 @@ class Engine:
         else:
             d = [x for x in lib.devices() if x['index'] == device_index][0]
             self._devs = (C.c_void_p * 2)(d['ptr'], None)
-            mp.n_gpu_layers = -1
+            mp.n_gpu_layers, n_main = gpu_layers(path, d['free_gb'])
             self.device = f"{d['desc']} ({d['name']})"
+            if mp.n_gpu_layers >= 0:                                  # only part fits: the last blocks on the GPU, the rest on the CPU
+                self.gpu_from = n_main - mp.n_gpu_layers
+                self.device += f' · {mp.n_gpu_layers}/{n_main} + CPU'
         mp.devices = C.cast(self._devs, C.c_void_p)
         mp.load_mtp = False
         self._progress = PROGRESS_CB(lambda p, ud: (progress(float(p)) if progress else None) or True)

@@ -10,7 +10,7 @@ What goes in:
 PyTorch stays out (about 3 GB); without it the server computes with numpy, only a bit slower.
 Needs internet while building (python.org, PyPI), not when the package is used.
 """
-import argparse, glob, os, shutil, subprocess, sys, time, urllib.request, zipfile
+import argparse, glob, os, shutil, stat, subprocess, sys, time, urllib.request, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -20,8 +20,14 @@ LLAMA_KEEP = ['llama.dll', 'ggml.dll', 'ggml-base.dll', 'ggml-vulkan.dll', 'ggml
 
 
 def wipe(d):
+    def writable(func, p, _):                # read-only files (e.g. copied DLLs) cannot be deleted on Windows as they are
+        try:
+            os.chmod(p, stat.S_IWRITE); func(p)
+        except OSError:
+            pass
     for _ in range(10):                      # a virus scanner may still hold freshly written DLLs for a moment
-        shutil.rmtree(d, ignore_errors=True)
+        if os.path.exists(d):
+            shutil.rmtree(d, onerror=writable)
         if not os.path.exists(d):
             return
         time.sleep(1)

@@ -69,8 +69,9 @@ def info():
     if L is None:
         return out
     out['build'] = ST['build']['kind']
+    cap = float(os.environ.get('LUPE_GPU_GB') or 0)                # the memory the loading plans with (see gpu_layers in lupe_infer.py)
     out['devices'] = [{'id': str(d['index']) if d['kind'] in ('GPU', 'iGPU') else 'cpu', 'kind': d['kind'], 'name': d['desc'] or d['name'], 'backend': d['name'],
-                       'free_gb': d['free_gb'], 'total_gb': d['total_gb']} for d in L.devices() if d['kind'] in ('GPU', 'iGPU', 'CPU')]
+                       'free_gb': cap if cap and d['kind'] != 'CPU' else d['free_gb'], 'total_gb': d['total_gb']} for d in L.devices() if d['kind'] in ('GPU', 'iGPU', 'CPU')]
     e = ST['engine']
     out['engine'] = {'path': e.path, 'device': e.device, 'dev_id': e.dev_id, 'load_s': round(e.load_s, 1)} if e else None
     return out
@@ -497,7 +498,7 @@ def run_explain(rid, i, pos, j):
                 out.update(kind='matmul', weight=srcs[0][1], row=j, n_terms=int(prod.size), total=float(prod.sum()), wtype=srcs[0][2]['type'], **terms(prod, W, a))
                 if srcs[0][2]['type'] not in ('f32', 'f16', 'bf16'):
                     try:
-                        out.update(total_q8=llama_like(r, srcs[0][1], srcs[0][2]['type'], j, W, a), q8_block=256 if r.engine.device == 'CPU' else 32)
+                        out.update(total_q8=llama_like(r, srcs[0][1], srcs[0][2]['type'], j, W, a), q8_block=256 if on_cpu(r, srcs[0][1]) else 32)
                     except Exception:
                         pass
                 return out
@@ -609,11 +610,22 @@ def q4k_parts(raw):
     return A, q.reshape(-1), B
 
 
+def on_cpu(r, name):
+    """Did the CPU compute with this weight? Pure CPU runs, and the blocks (and output head) that did not fit on the GPU."""
+    e = r.engine
+    if e.device == 'CPU':
+        return True
+    if not e.gpu_from:
+        return False
+    m = re.match(r'blk\.(\d+)\.', name)
+    return int(m.group(1)) < e.gpu_from if m else name.startswith('output.')
+
+
 def llama_like(r, name, wtype, j, W, a):
     """The dot product the way llama.cpp computes it: input rounded to 8 bit first.
     GPU (q8_1, blocks of 32): scale stored as fp16; for weights with a minimum (Q4_K) the minimum part uses the
     unrounded block sum, also stored as fp16. CPU (q8_K, blocks of 256): float scale, both parts with the rounded input."""
-    if r.engine.device == 'CPU':
+    if on_cpu(r, name):
         return float((W * q8(a, 256)).sum())
     n = a.size - a.size % 32
     b = a[:n].reshape(-1, 32)
